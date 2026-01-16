@@ -1,0 +1,3 @@
+# Disable JWT verification so OPTIONS preflight can pass
+[function]
+verify_jwt = false

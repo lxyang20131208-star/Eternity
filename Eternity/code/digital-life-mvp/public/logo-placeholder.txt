@@ -1,0 +1,1 @@
+Please manually save the EverArchive logo image as logo.png in this directory
