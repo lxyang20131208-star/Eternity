@@ -191,7 +191,7 @@ export default function BookProgressPage() {
           </div>
           <div className="flex items-center gap-3">
             <Link
-              href="/"
+              href="/main"
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
             >
               返回录音

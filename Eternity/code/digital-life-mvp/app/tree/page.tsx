@@ -176,7 +176,7 @@ export default function TreePage() {
           <h2 className="text-2xl font-bold text-gray-800 mb-2">未找到项目</h2>
           <p className="text-gray-600 mb-6">请先创建或选择一个项目</p>
           <a
-            href="/"
+            href="/main"
             className="inline-block px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
           >
             返回首页
@@ -294,11 +294,11 @@ export default function TreePage() {
                             {person.role}
                           </span>
                         )}
-                        {person.bio && (
-                          <p className="text-sm text-gray-600 line-clamp-2">{person.bio}</p>
+                        {person.bio_snippet && (
+                          <p className="text-sm text-gray-600 line-clamp-2">{person.bio_snippet}</p>
                         )}
                         <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-                          {person.birth_date && <span>🎂 {person.birth_date}</span>}
+                          {person.metadata?.birth_date && <span>🎂 {person.metadata.birth_date}</span>}
                           {person.importance_score && (
                             <span>⭐ {person.importance_score}/10</span>
                           )}
@@ -339,10 +339,10 @@ export default function TreePage() {
                     />
                   )}
 
-                  {selectedPerson.bio && (
+                  {selectedPerson.bio_snippet && (
                     <div className="mb-4">
                       <h4 className="text-sm font-medium text-gray-700 mb-2">简介</h4>
-                      <p className="text-sm text-gray-600">{selectedPerson.bio}</p>
+                      <p className="text-sm text-gray-600">{selectedPerson.bio_snippet}</p>
                     </div>
                   )}
 
@@ -353,10 +353,10 @@ export default function TreePage() {
                         <span className="text-gray-900 ml-2">{selectedPerson.role}</span>
                       </div>
                     )}
-                    {selectedPerson.birth_date && (
+                    {selectedPerson.metadata?.birth_date && (
                       <div>
                         <span className="text-gray-500">出生：</span>
-                        <span className="text-gray-900 ml-2">{selectedPerson.birth_date}</span>
+                        <span className="text-gray-900 ml-2">{selectedPerson.metadata.birth_date}</span>
                       </div>
                     )}
                     {selectedPerson.importance_score && (
@@ -487,14 +487,14 @@ export default function TreePage() {
                           )}
                         </div>
 
-                        {event.time_refs && event.time_refs.length > 0 && (
+                        {event.timeRef && (
                           <div className="text-sm text-gray-600 mb-2">
-                            📅 {formatDate(event.time_refs[0])}
+                            📅 {formatDate(event.timeRef)}
                           </div>
                         )}
 
-                        {event.description && (
-                          <p className="text-sm text-gray-600 mb-3">{event.description}</p>
+                        {event.summary && (
+                          <p className="text-sm text-gray-600 mb-3">{event.summary}</p>
                         )}
 
                         {event.tags && event.tags.length > 0 && (
@@ -538,7 +538,7 @@ export default function TreePage() {
                           </div>
                         )}
 
-                        {event.evidence_source && (
+                        {event.evidence && event.evidence.length > 0 && (
                           <button
                             onClick={() => toggleEvidence(event.id)}
                             className="text-sm text-blue-600 hover:text-blue-700"
@@ -547,9 +547,11 @@ export default function TreePage() {
                           </button>
                         )}
 
-                        {expandedEvents.has(event.id) && event.evidence_source && (
+                        {expandedEvents.has(event.id) && event.evidence && event.evidence.length > 0 && (
                           <div className="mt-2 p-3 bg-gray-50 rounded text-sm text-gray-600">
-                            {event.evidence_source}
+                            {event.evidence.map((e, i) => (
+                              <div key={i}>{e.text} <span className="text-gray-400">- {e.source}</span></div>
+                            ))}
                           </div>
                         )}
                       </div>
@@ -597,9 +599,9 @@ export default function TreePage() {
                           className="p-4 border border-gray-200 rounded-lg hover:border-green-400 hover:shadow-md transition-all cursor-pointer"
                         >
                           <h4 className="font-semibold text-gray-900 mb-2">{place.name}</h4>
-                          {place.coordinates && (
+                          {place.lat && place.lng && (
                             <div className="text-xs text-gray-500 mb-2">
-                              📍 {place.coordinates.lat.toFixed(4)}, {place.coordinates.lng.toFixed(4)}
+                              📍 {place.lat.toFixed(4)}, {place.lng.toFixed(4)}
                             </div>
                           )}
                           {place.description && (
@@ -650,11 +652,11 @@ export default function TreePage() {
                         <span className="text-gray-900 ml-2">{selectedPlace.place_level}</span>
                       </div>
                     )}
-                    {selectedPlace.coordinates && (
+                    {selectedPlace.lat && selectedPlace.lng && (
                       <div>
                         <span className="text-gray-500">坐标：</span>
                         <span className="text-gray-900 ml-2">
-                          {selectedPlace.coordinates.lat.toFixed(4)}, {selectedPlace.coordinates.lng.toFixed(4)}
+                          {selectedPlace.lat.toFixed(4)}, {selectedPlace.lng.toFixed(4)}
                         </span>
                       </div>
                     )}

@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from './supabaseClient';
 import type {
   Photo,
   Album,
@@ -10,9 +10,7 @@ import type {
   UnsortedStats,
 } from './types/photos';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+// Use shared supabase client to avoid multiple GoTrueClient instances in browser
 
 // ====================================
 // Photos API
@@ -349,15 +347,46 @@ export async function updateReminderStatus(
 // ====================================
 
 export async function getUnsortedStats(projectId: string): Promise<UnsortedStats> {
-  const { data, error } = await supabase
+  // Get basic unsorted stats from view
+  const { data: basicStats, error: basicError } = await supabase
     .from('unsorted_photos_stats')
     .select('*')
     .eq('project_id', projectId)
     .single();
-  
-  if (error && error.code !== 'PGRST116') throw error;
-  
-  return data || { project_id: projectId, unsorted_count: 0 };
+
+  if (basicError && basicError.code !== 'PGRST116') throw basicError;
+
+  // Get total unsorted count
+  const { count: totalCount } = await supabase
+    .from('photos')
+    .select('*', { count: 'exact', head: true })
+    .eq('project_id', projectId)
+    .eq('is_sorted', false);
+
+  // Get count without person
+  const { count: withoutPerson } = await supabase
+    .from('photos')
+    .select('*', { count: 'exact', head: true })
+    .eq('project_id', projectId)
+    .eq('is_sorted', false)
+    .or('person_ids.is.null,person_ids.eq.{}');
+
+  // Get count without place
+  const { count: withoutPlace } = await supabase
+    .from('photos')
+    .select('*', { count: 'exact', head: true })
+    .eq('project_id', projectId)
+    .eq('is_sorted', false)
+    .is('place_id', null);
+
+  return {
+    project_id: projectId,
+    unsorted_count: basicStats?.unsorted_count || 0,
+    total_count: totalCount || 0,
+    without_person: withoutPerson || 0,
+    without_place: withoutPlace || 0,
+    last_upload: basicStats?.last_upload,
+  };
 }
 
 export async function getPhotosByPerson(projectId: string, personId: string): Promise<Photo[]> {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,10 +11,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Create client with user's token
+    // Create client with user's token for proper RLS
     const token = authHeader.replace('Bearer ', '')
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      global: { headers: { Authorization: authHeader } }
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } }
     })
 
     // Verify user
@@ -29,22 +29,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid data format' }, { status: 400 })
     }
 
-    // Upsert people roster
-    const rosterInserts = roster.map(person => ({
-      id: person.id,
-      user_id: user.id,
-      name: person.name,
-      relation: person.relation || null,
-      avatar_url: person.avatarUrl || null
-    }))
+    // Upsert people roster (only if there are people to save)
+    if (roster.length > 0) {
+      const rosterInserts = roster.map(person => ({
+        id: person.id,
+        user_id: user.id,
+        name: person.name,
+        relation: person.relation || null,
+        avatar_url: person.avatarUrl || null
+      }))
 
-    const { error: rosterError } = await supabase
-      .from('people_roster')
-      .upsert(rosterInserts, { onConflict: 'id' })
+      const { error: rosterError } = await supabase
+        .from('people_roster')
+        .upsert(rosterInserts, { onConflict: 'id' })
 
-    if (rosterError) {
-      console.error('Roster upsert error:', rosterError)
-      return NextResponse.json({ error: 'Failed to save people roster' }, { status: 500 })
+      if (rosterError) {
+        console.error('Roster upsert error:', rosterError)
+        // Return detailed error for debugging
+        return NextResponse.json({
+          error: 'Failed to save people roster',
+          details: rosterError.message,
+          code: rosterError.code,
+          hint: rosterError.hint
+        }, { status: 500 })
+      }
     }
 
     // Process each photo
@@ -71,6 +79,8 @@ export async function POST(req: NextRequest) {
 
       if (photoError) {
         console.error('Photo upsert error:', photoError)
+        // Continue but log detailed error
+        console.error('Photo details:', { photoData, error: photoError.message, code: photoError.code })
         continue
       }
 
@@ -82,7 +92,7 @@ export async function POST(req: NextRequest) {
 
       // Insert new photo-people associations
       if (photo.people && photo.people.length > 0) {
-        const peopleInserts = photo.people.map(person => ({
+        const peopleInserts = photo.people.map((person: { id: string; isUnknown?: boolean }) => ({
           photo_id: photo.id,
           person_id: person.id,
           is_unknown: person.isUnknown || false
@@ -120,8 +130,8 @@ export async function GET(req: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      global: { headers: { Authorization: authHeader } }
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } }
     })
 
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)

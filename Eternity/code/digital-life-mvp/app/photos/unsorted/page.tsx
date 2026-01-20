@@ -20,9 +20,11 @@ export default function UnsortedQueuePage() {
     try {
       const projectId = 'YOUR_PROJECT_ID'; // TODO: 从session获取
       const data = await getPhotos(projectId, {
-        is_sorted: false,
-        sort_by: 'created_at',
-        sort_order: 'asc',
+        filters: {
+          is_sorted: false,
+        },
+        sort: 'uploaded_at',
+        order: 'asc',
       });
       setPhotos(data);
     } catch (error) {

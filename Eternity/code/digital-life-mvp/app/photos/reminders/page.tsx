@@ -31,12 +31,9 @@ export default function RemindersPage() {
     try {
       const snoozeUntil = new Date();
       snoozeUntil.setDate(snoozeUntil.getDate() + days);
-      
-      await updateReminderStatus(reminderId, {
-        status: 'snoozed',
-        snooze_until: snoozeUntil.toISOString(),
-      });
-      
+
+      await updateReminderStatus(reminderId, 'snoozed', snoozeUntil.toISOString());
+
       await loadReminders();
     } catch (error) {
       console.error('Failed to snooze reminder:', error);
@@ -45,7 +42,7 @@ export default function RemindersPage() {
 
   const handleDismiss = async (reminderId: string) => {
     try {
-      await updateReminderStatus(reminderId, { status: 'dismissed' });
+      await updateReminderStatus(reminderId, 'dismissed');
       await loadReminders();
     } catch (error) {
       console.error('Failed to dismiss reminder:', error);
@@ -54,8 +51,8 @@ export default function RemindersPage() {
 
   const handleComplete = async (reminderId: string) => {
     try {
-      await updateReminderStatus(reminderId, { status: 'completed' });
-      router.push('/photos/upload');
+      await updateReminderStatus(reminderId, 'completed');
+      router.push('/photos/new');
     } catch (error) {
       console.error('Failed to complete reminder:', error);
     }
@@ -93,7 +90,7 @@ export default function RemindersPage() {
       case 'inactive':
         return '该添加新照片了';
       case 'contextual':
-        return reminder.context?.title || '上传相关照片';
+        return reminder.metadata?.title || '上传相关照片';
       default:
         return '上传照片';
     }
@@ -104,14 +101,14 @@ export default function RemindersPage() {
       case 'welcome':
         return '上传照片让我们开始记录你的人生故事吧！我们建议从家庭相册开始。';
       case 'inactive':
-        const daysSince = reminder.context?.days_since_last_upload || 0;
+        const daysSince = reminder.metadata?.days_since_last_upload || 0;
         return `你已经 ${daysSince} 天没有上传照片了。定期添加照片可以让回忆更加完整。`;
       case 'contextual':
-        if (reminder.context?.person_name) {
-          return `你最近提到了"${reminder.context.person_name}"，不妨上传一些相关的照片？`;
+        if (reminder.metadata?.person_name) {
+          return `你最近提到了"${reminder.metadata.person_name}"，不妨上传一些相关的照片？`;
         }
-        if (reminder.context?.event_title) {
-          return `关于"${reminder.context.event_title}"，有相关照片想要上传吗？`;
+        if (reminder.metadata?.event_title) {
+          return `关于"${reminder.metadata.event_title}"，有相关照片想要上传吗？`;
         }
         return '添加相关照片让故事更生动';
       default:

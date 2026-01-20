@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 export async function POST(request: NextRequest) {
   try {
+    const openaiApiKey = process.env.OPENAI_API_KEY
+    if (!openaiApiKey) {
+      return NextResponse.json({ error: 'OpenAI API key not configured' }, { status: 400 })
+    }
+    const openai = new OpenAI({ apiKey: openaiApiKey })
     const { text, projectId } = await request.json();
 
     if (!text || !projectId) {

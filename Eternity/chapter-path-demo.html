@@ -1,0 +1,847 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>EverArchive · Chapter Path Demo</title>
+  <style>
+    :root{
+      --bg: #FAFAF7;
+      --surface: #FFFFFF;
+      --text: #1F2933;
+      --muted: #6B7280;
+      --border: #E6E0D6;
+
+      --green: #13B57A;
+      --green-2: #0EA56F;
+      --yellow: #F6B73C;
+      --lock: #B9B5AE;
+
+      --shadow: 0 10px 30px rgba(0,0,0,.08);
+      --radius: 18px;
+    }
+
+    *{ box-sizing: border-box; }
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "PingFang SC","Hiragino Sans GB","Microsoft YaHei", Arial, sans-serif;
+      color: var(--text);
+      background: radial-gradient(1200px 900px at 50% -200px, rgba(246,183,60,.14), transparent 55%),
+                  radial-gradient(1000px 800px at 0% 30%, rgba(19,181,122,.10), transparent 55%),
+                  var(--bg);
+    }
+
+    .topbar{
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(250,250,247,.88);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-inner{
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width: 220px;
+    }
+    .logo{
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, rgba(19,181,122,.18), rgba(246,183,60,.16));
+      border: 1px solid var(--border);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-weight: 800;
+      color: var(--green-2);
+    }
+    .brand h1{
+      font-size: 14px;
+      margin: 0;
+      letter-spacing: .4px;
+    }
+    .brand p{
+      margin: 2px 0 0 0;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .actions{
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+    .pill{
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: 999px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: var(--text);
+      display:flex;
+      align-items:center;
+      gap: 8px;
+      box-shadow: 0 6px 16px rgba(0,0,0,.05);
+    }
+    .btn{
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      box-shadow: 0 6px 16px rgba(0,0,0,.05);
+    }
+    .btn:hover{ transform: translateY(-1px); }
+    .btn:active{ transform: translateY(0px); }
+
+    .wrap{
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px 16px 80px;
+    }
+
+    /* ===== Main layout: left 2/3 + right 1/3 ===== */
+    .main-layout{
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+    .map-area{ min-width: 0; }
+    .deep-area{ position: sticky; top: 92px; }
+
+    /* Deep supplement (Round 2) panel */
+    .deep-card{
+      border: 1px dashed var(--border);
+      border-radius: 18px;
+      background: rgba(255,255,255,.85);
+      padding: 16px;
+      box-shadow: 0 10px 26px rgba(0,0,0,.06);
+      overflow: hidden;
+    }
+    .deep-header{
+      font-weight: 800;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .deep-header-left{
+      display:flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    .deep-sub{
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .deep-badge{
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(250,250,247,.9);
+      color: #444;
+      white-space: nowrap;
+    }
+    .deep-desc{
+      margin: 12px 0;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #374151;
+    }
+    .deep-progress{
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .deep-bar{
+      margin-top: 8px;
+      height: 8px;
+      background: rgba(185,181,174,.25);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .deep-bar > div{
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--green), var(--yellow));
+      border-radius: 999px;
+      transition: width .5s ease;
+    }
+    .deep-cta{
+      margin-top: 14px;
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .deep-primary{
+      width: 100%;
+      background: linear-gradient(135deg, rgba(19,181,122,.95), rgba(19,181,122,.78));
+      color: #fff;
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 14px;
+      font-weight: 800;
+      cursor:pointer;
+      box-shadow: 0 14px 30px rgba(19,181,122,.22);
+    }
+    .deep-primary[disabled]{
+      opacity: .55;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    .deep-lockhint{
+      width: 100%;
+      padding: 10px;
+      text-align: center;
+      border-radius: 12px;
+      background: rgba(0,0,0,.04);
+      font-size: 12px;
+      color: var(--muted);
+      border: 1px solid rgba(0,0,0,.04);
+    }
+
+    .header{
+      display:flex;
+      align-items:flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 14px 0 18px;
+    }
+    .header h2{
+      margin:0;
+      font-size: 22px;
+      letter-spacing: .4px;
+    }
+    .header .sub{
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .progress-card{
+      min-width: 260px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 14px 14px 12px;
+    }
+    .progress-top{
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    .bar{
+      height: 10px;
+      background: rgba(185,181,174,.25);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .bar > div{
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--green), var(--yellow));
+      border-radius: 999px;
+      transition: width .5s ease;
+    }
+
+    /* MAP */
+    .map{
+      position: relative;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.70);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: 28px 14px 28px;
+      overflow: hidden;
+    }
+
+    .map::before{
+      content:"";
+      position:absolute;
+      inset:0;
+      background:
+        radial-gradient(600px 260px at 20% 10%, rgba(246,183,60,.10), transparent 60%),
+        radial-gradient(700px 260px at 80% 30%, rgba(19,181,122,.10), transparent 60%);
+      pointer-events:none;
+    }
+
+    .path{
+      position: relative;
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 12px 0 24px;
+    }
+
+    /* faint vertical guide line */
+    .path-line{
+      position:absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 6px;
+      transform: translateX(-50%);
+      border-radius: 999px;
+      background: linear-gradient(180deg, rgba(19,181,122,.16), rgba(246,183,60,.12));
+      filter: blur(.2px);
+      opacity: .75;
+    }
+
+    .node{
+      position: relative;
+      width: 100%;
+      height: 120px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+
+    .node-inner{
+      position:absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      display:flex;
+      align-items:center;
+      gap: 12px;
+    }
+
+    /* zigzag offsets to mimic Duolingo path */
+    .node[data-side="left"] .node-inner{ transform: translateX(-50%) translateX(-140px); }
+    .node[data-side="right"] .node-inner{ transform: translateX(-50%) translateX(140px); }
+    .node[data-side="center"] .node-inner{ transform: translateX(-50%); }
+
+    .bubble{
+      position: relative;
+      width: 74px;
+      height: 74px;
+      border-radius: 999px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-weight: 800;
+      user-select:none;
+      cursor: pointer;
+      border: 2px solid rgba(0,0,0,.06);
+      box-shadow: 0 14px 30px rgba(0,0,0,.10);
+      transition: transform .15s ease, filter .2s ease, opacity .2s ease;
+      background: var(--surface);
+    }
+
+    .bubble:hover{ transform: translateY(-2px) scale(1.02); }
+    .bubble:active{ transform: translateY(0px) scale(.99); }
+
+    .badge-lock{
+      position:absolute;
+      right: -2px;
+      top: -2px;
+      width: 22px;
+      height: 22px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid var(--border);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size: 12px;
+      color: var(--lock);
+      box-shadow: 0 8px 18px rgba(0,0,0,.08);
+    }
+
+    .label{
+      min-width: 240px;
+      max-width: 320px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.86);
+      box-shadow: 0 10px 22px rgba(0,0,0,.06);
+    }
+    .label .title{
+      font-size: 13px;
+      font-weight: 700;
+      display:flex;
+      align-items:center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .label .meta{
+      font-size: 12px;
+      color: var(--muted);
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .tag{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(250,250,247,.8);
+      font-size: 11px;
+      color: #444;
+    }
+
+    /* states */
+    .state-done .bubble{
+      background: linear-gradient(135deg, rgba(19,181,122,.18), rgba(19,181,122,.05));
+      border-color: rgba(19,181,122,.30);
+      color: var(--green-2);
+    }
+    .state-done .bubble::after{
+      content:"✓";
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size: 24px;
+      color: var(--green-2);
+    }
+
+    .state-current .bubble{
+      background: linear-gradient(135deg, rgba(246,183,60,.20), rgba(19,181,122,.12));
+      border-color: rgba(246,183,60,.35);
+      color: #2B2B2B;
+      filter: saturate(1.08);
+    }
+    .state-current .bubble{
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+    @keyframes pulse{
+      0%,100%{ box-shadow: 0 14px 30px rgba(0,0,0,.10), 0 0 0 0 rgba(246,183,60,.28); }
+      50%{ box-shadow: 0 16px 34px rgba(0,0,0,.14), 0 0 0 14px rgba(246,183,60,0); }
+    }
+
+    .state-locked .bubble{
+      background: rgba(185,181,174,.20);
+      border-color: rgba(185,181,174,.40);
+      color: var(--lock);
+      opacity: .95;
+      cursor: not-allowed;
+      box-shadow: 0 12px 24px rgba(0,0,0,.08);
+    }
+
+    /* bottom sheet */
+    .sheet-backdrop{
+      position:fixed;
+      inset:0;
+      background: rgba(0,0,0,.32);
+      opacity:0;
+      pointer-events:none;
+      transition: opacity .2s ease;
+      z-index: 50;
+    }
+    .sheet-backdrop.show{
+      opacity:1;
+      pointer-events:auto;
+    }
+
+    .sheet{
+      position:fixed;
+      left: 50%;
+      bottom: -520px;
+      transform: translateX(-50%);
+      width: min(680px, calc(100vw - 24px));
+      background: rgba(255,255,255,.95);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: 22px 22px 18px 18px;
+      box-shadow: 0 24px 70px rgba(0,0,0,.24);
+      transition: bottom .25s ease;
+      z-index: 60;
+      overflow:hidden;
+    }
+    .sheet.show{ bottom: 12px; }
+    .sheet-header{
+      padding: 12px 14px 0;
+      display:flex;
+      justify-content:center;
+    }
+    .grabber{
+      width: 56px;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(0,0,0,.12);
+      margin-bottom: 10px;
+    }
+    .sheet-body{
+      padding: 12px 16px 16px;
+    }
+    .sheet-title{
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .sheet-title h3{
+      margin:0;
+      font-size: 16px;
+      letter-spacing: .2px;
+    }
+    .sheet-title .mini{
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .sheet-desc{
+      margin: 0 0 12px 0;
+      color: #334155;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .sheet-actions{
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .primary{
+      background: linear-gradient(135deg, rgba(19,181,122,.95), rgba(19,181,122,.78));
+      color: #fff;
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 14px;
+      font-weight: 700;
+      cursor:pointer;
+      box-shadow: 0 14px 30px rgba(19,181,122,.22);
+    }
+    .secondary{
+      background: rgba(250,250,247,.9);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px 14px;
+      font-weight: 600;
+      cursor:pointer;
+    }
+
+    /* toast */
+    .toast{
+      position: fixed;
+      left: 50%;
+      top: 78px;
+      transform: translateX(-50%);
+      background: rgba(31,41,51,.92);
+      color: #fff;
+      padding: 10px 12px;
+      border-radius: 12px;
+      box-shadow: 0 16px 40px rgba(0,0,0,.22);
+      font-size: 12px;
+      opacity: 0;
+      pointer-events:none;
+      transition: opacity .18s ease, transform .18s ease;
+      z-index: 80;
+    }
+    .toast.show{
+      opacity:1;
+      transform: translateX(-50%) translateY(2px);
+    }
+
+    /* small screen */
+    @media (max-width: 720px){
+      .header{ flex-direction: column; align-items: flex-start; }
+      .progress-card{ width: 100%; }
+      .label{ min-width: 210px; max-width: 240px; }
+      .node[data-side="left"] .node-inner{ transform: translateX(-50%) translateX(-92px); }
+      .node[data-side="right"] .node-inner{ transform: translateX(-50%) translateX(92px); }
+
+      .main-layout{ grid-template-columns: 1fr; }
+      .deep-area{ position: relative; top: auto; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="logo">EA</div>
+        <div>
+          <h1>EverArchive</h1>
+          <p>CHAPTER PATH · 地图关卡</p>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn" onclick="alert('Demo：返回主页')">返回主页</button>
+        <div class="pill">账号：<span id="account">376813260@qq.com</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="header">
+      <div>
+        <h2>章节路径 / 地图关卡</h2>
+        <div class="sub">
+          像多邻国一样：你只需要关注「下一关」。点击关卡开始回答，系统会自动推进解锁。
+        </div>
+      </div>
+
+      <div class="progress-card">
+        <div class="progress-top">
+          <span>主问题进度</span>
+          <span><b id="answeredCount">65</b> / <span id="totalCount">101</span></span>
+        </div>
+        <div class="bar"><div id="barFill"></div></div>
+      </div>
+    </div>
+
+    <div class="main-layout">
+      <div class="map-area">
+        <div class="map">
+          <div class="path">
+            <div class="path-line"></div>
+            <div id="nodes"></div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="deep-area">
+        <div class="deep-card" id="deepCard">
+          <div class="deep-header">
+            <div class="deep-header-left">
+              <span id="deepLockIcon">🔒</span>
+              <span>深度补充</span>
+              <span class="deep-sub">Round 2 Questions</span>
+            </div>
+            <span class="deep-badge" id="deepBadge">完成 70 题解锁</span>
+          </div>
+
+          <p class="deep-desc">
+            深度补充是一组由 AI 基于你已完成的回答自动生成的新问题，用来追问那些「你没主动说，但很重要」的细节。
+          </p>
+
+          <div class="deep-progress">
+            当前进度：<b id="deepAnswered">0</b> / <span id="deepNeed">70</span>
+            <div class="deep-bar"><div id="deepFill"></div></div>
+          </div>
+
+          <div class="deep-cta">
+            <button class="deep-primary" id="deepPrimaryBtn" disabled>开始深度补充</button>
+            <button class="deep-secondary" id="deepSecondaryBtn">了解更多</button>
+          </div>
+
+          <div class="deep-foot" id="deepFoot">完成 70 道主问题后即可解锁该功能</div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- toast -->
+  <div class="toast" id="toast"></div>
+
+  <!-- bottom sheet -->
+  <div class="sheet-backdrop" id="backdrop"></div>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="sheet-header"><div class="grabber"></div></div>
+    <div class="sheet-body">
+      <div class="sheet-title">
+        <h3 id="sheetTitle">章节</h3>
+        <div class="mini" id="sheetMeta">节点</div>
+      </div>
+      <p class="sheet-desc" id="sheetDesc"></p>
+      <div class="sheet-actions">
+        <button class="primary" id="sheetPrimary">开始</button>
+        <button class="secondary" id="sheetSecondary">稍后再说</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // ==== Demo data ====
+  // 你接入真实数据时：
+  // 1) answeredCount 来自主问题完成数
+  // 2) chapters 用你现在的章节/节点结构替换
+  const answeredCount = 65;
+  const totalCount = 101;
+
+  const chapters = [
+    { id: 1, title: "童年与原生家庭", nodes: 15, doneNodes: 15, unlockAt: 0,  desc: "从出生地、家庭氛围、第一印象开始，把你最早的记忆落在纸上。" },
+    { id: 2, title: "小学到初中",   nodes: 15, doneNodes: 15, unlockAt: 0,  desc: "学校、同学、第一次被认可或挫败的瞬间，决定了很多性格底色。" },
+    { id: 3, title: "高中到大学",   nodes: 10, doneNodes: 10, unlockAt: 0,  desc: "选择、分岔路、重要的朋友——这里通常是人生观第一次成形。" },
+    { id: 4, title: "进入社会与早期独立", nodes: 10, doneNodes: 10, unlockAt: 0, desc: "第一份工作、第一次搬家、第一次真正为自己做决定。" },
+    // 后面章节故意做成未完成/锁定，营造“路径推进感”
+    { id: 5, title: "成家责任与关键变化", nodes: 25, doneNodes: 14, unlockAt: 50, desc: "亲密关系、责任与转折。把你如何改变、为何改变讲清楚。" },
+    { id: 6, title: "价值观模式与整合", nodes: 25, doneNodes: 0,  unlockAt: 70, desc: "当你回看一生：哪些原则一直没变？哪些是后来才懂的？" },
+  ];
+
+  // side pattern to create S curve feel
+  const sidePattern = ["left","center","right","center","left","center","right"];
+
+  // Determine chapter state based on progress
+  // 这里用 answeredCount 模拟：达标即解锁；doneNodes==nodes 视为已完成；
+  // 真实版你可用更严谨逻辑（按章节节点完成数）
+  function getState(ch){
+    const unlocked = answeredCount >= ch.unlockAt;
+    if(!unlocked) return "locked";
+    if(ch.doneNodes >= ch.nodes) return "done";
+    // 第一个已解锁但未完成的章节，作为 current
+    return "open";
+  }
+
+  // compute "current" = first open (unlocked but not done)
+  const states = chapters.map(getState);
+  const currentIndex = states.findIndex(s => s === "open");
+  const finalStates = chapters.map((c, idx) => {
+    if (states[idx] === "open" && idx === currentIndex) return "current";
+    if (states[idx] === "open") return "open"; // unlocked but not current
+    return states[idx];
+  });
+
+  // progress bar
+  document.getElementById("answeredCount").textContent = answeredCount;
+  document.getElementById("totalCount").textContent = totalCount;
+  document.getElementById("barFill").style.width = Math.round((answeredCount/totalCount)*100) + "%";
+
+  // ===== Deep supplement (Round 2) panel =====
+  const deepNeed = 70;
+  const deepAnsweredEl = document.getElementById("deepAnswered");
+  const deepNeedEl = document.getElementById("deepNeed");
+  const deepFillEl = document.getElementById("deepFill");
+  const deepPrimaryBtn = document.getElementById("deepPrimaryBtn");
+  const deepSecondaryBtn = document.getElementById("deepSecondaryBtn");
+  const deepLockIcon = document.getElementById("deepLockIcon");
+  const deepBadge = document.getElementById("deepBadge");
+  const deepFoot = document.getElementById("deepFoot");
+
+  deepAnsweredEl.textContent = Math.min(answeredCount, deepNeed);
+  deepNeedEl.textContent = deepNeed;
+  deepFillEl.style.width = Math.min(100, Math.round((answeredCount / deepNeed) * 100)) + "%";
+
+  const deepUnlocked = answeredCount >= deepNeed;
+  if (deepUnlocked) {
+    deepLockIcon.textContent = "✨";
+    deepBadge.textContent = "已解锁";
+    deepPrimaryBtn.disabled = false;
+    deepFoot.textContent = "AI 已为你准备好一组深度追问（Demo 入口）";
+  } else {
+    deepLockIcon.textContent = "🔒";
+    deepBadge.textContent = `完成 ${deepNeed} 题解锁`;
+    deepPrimaryBtn.disabled = true;
+    deepFoot.textContent = `完成 ${deepNeed} 道主问题后即可解锁该功能`;
+  }
+
+  deepPrimaryBtn.addEventListener("click", () => {
+    if (!deepUnlocked) {
+      showToast(`完成 ${deepNeed} 道主问题后解锁深度补充`);
+      return;
+    }
+    showToast("开始深度补充（Demo 跳转）");
+  });
+
+  deepSecondaryBtn.addEventListener("click", () => {
+    showToast("深度补充：AI 会基于你的回答生成更个性化的追问（Demo）");
+  });
+
+  // render nodes
+  const nodesEl = document.getElementById("nodes");
+  nodesEl.innerHTML = chapters.map((ch, idx) => {
+    const state = finalStates[idx];
+    const side = sidePattern[idx % sidePattern.length];
+    const doneLabel = `${ch.doneNodes}/${ch.nodes} 节点`;
+    const tagText = state === "done" ? "已完成" : state === "current" ? "下一关" : state === "open" ? "已解锁" : `锁定 · 需${ch.unlockAt}题`;
+
+    return `
+      <div class="node state-${state}" data-side="${side}">
+        <div class="node-inner">
+          <div class="bubble" data-idx="${idx}" aria-label="${ch.title}">
+            ${state === "locked" ? `<div class="badge-lock">🔒</div>` : ``}
+            ${state === "open" || state === "current" ? `<span style="font-size:14px">${ch.id}</span>` : ``}
+          </div>
+          <div class="label">
+            <div class="title">
+              <span>${ch.id}. ${ch.title}</span>
+              <span class="tag">${tagText}</span>
+            </div>
+            <div class="meta">
+              <span>${doneLabel}</span>
+              <span style="color:#9A8F7A">·</span>
+              <span>${state === "locked" ? "点一下看看如何解锁" : "点击开始 / 查看"}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // interactions
+  const toast = document.getElementById("toast");
+  let toastTimer = null;
+
+  function showToast(msg){
+    toast.textContent = msg;
+    toast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("show"), 1600);
+  }
+
+  const sheet = document.getElementById("sheet");
+  const backdrop = document.getElementById("backdrop");
+  const sheetTitle = document.getElementById("sheetTitle");
+  const sheetMeta = document.getElementById("sheetMeta");
+  const sheetDesc = document.getElementById("sheetDesc");
+  const sheetPrimary = document.getElementById("sheetPrimary");
+  const sheetSecondary = document.getElementById("sheetSecondary");
+
+  function openSheet(ch){
+    sheetTitle.textContent = `${ch.id}. ${ch.title}`;
+    sheetMeta.textContent = `${ch.doneNodes}/${ch.nodes} 节点`;
+    sheetDesc.textContent = ch.desc;
+    sheet.classList.add("show");
+    backdrop.classList.add("show");
+    sheet.setAttribute("aria-hidden","false");
+  }
+  function closeSheet(){
+    sheet.classList.remove("show");
+    backdrop.classList.remove("show");
+    sheet.setAttribute("aria-hidden","true");
+  }
+
+  backdrop.addEventListener("click", closeSheet);
+  sheetSecondary.addEventListener("click", closeSheet);
+
+  // Delegate bubble clicks
+  nodesEl.addEventListener("click", (e) => {
+    const bubble = e.target.closest(".bubble");
+    if(!bubble) return;
+    const idx = Number(bubble.dataset.idx);
+    const ch = chapters[idx];
+    const state = finalStates[idx];
+
+    if(state === "locked"){
+      showToast(`完成 ${ch.unlockAt} 道主问题后解锁「${ch.title}」`);
+      return;
+    }
+
+    openSheet(ch);
+
+    sheetPrimary.onclick = () => {
+      closeSheet();
+      // Demo action: jump to chapter
+      showToast(`开始：${ch.title}（Demo 跳转）`);
+      // 实际接入：router.push(`/chapter/${ch.id}`) 或打开章节题目页
+    };
+  });
+</script>
+</body>
+</html>

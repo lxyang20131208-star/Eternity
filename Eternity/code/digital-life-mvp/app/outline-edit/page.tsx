@@ -251,7 +251,7 @@ export default function OutlineEditPage() {
       <div className="detroit-bg" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center' }}>
           <p style={{ marginBottom: 16, color: 'var(--text-secondary)' }}>请先登录</p>
-          <Link href="/" className="cyber-btn">返回首页</Link>
+          <Link href="/main" className="cyber-btn">返回首页</Link>
         </div>
       </div>
     )

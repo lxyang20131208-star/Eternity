@@ -1,9 +1,7 @@
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from './supabaseClient';
 import type { UploadOptions, UploadResult, PhotoMetadata } from './types/photos';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+// Use shared supabase client to avoid multiple GoTrueClient instances in browser
 
 // ====================================
 // 文件上传

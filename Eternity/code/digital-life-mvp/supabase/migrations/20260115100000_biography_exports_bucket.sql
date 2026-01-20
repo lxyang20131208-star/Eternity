@@ -9,8 +9,7 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
--- Enable RLS on storage.objects
-ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+-- Note: RLS on storage.objects is already enabled by Supabase by default
 
 -- Policy: Allow authenticated users to upload PDFs to their own project folders
 CREATE POLICY "Users can upload PDFs to their project folders"

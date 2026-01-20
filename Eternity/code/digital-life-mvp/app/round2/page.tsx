@@ -569,7 +569,7 @@ export default function Round2Page() {
             <h3 className="mb-2 text-xl font-bold text-emerald-800">全部完成!</h3>
             <p className="mb-4 text-emerald-700">您已回答所有补充问题，现在可以生成更丰富的传记了</p>
             <Link
-              href="/"
+              href="/main"
               className="inline-block rounded-lg bg-emerald-500 px-6 py-3 font-semibold text-white shadow transition hover:bg-emerald-600"
             >
               返回主页生成传记

@@ -26,21 +26,41 @@ async function expandChapterBatch(
   chapterIndices: number[],
   accessToken: string
 ): Promise<ExpandedChapter[]> {
-  const functionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/expand_biography_chapters`
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 
-  const response = await fetch(functionUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({
-      project_id: projectId,
-      outline_id: outlineId,
-      author_style: authorStyle,
-      chapter_indices: chapterIndices,
-    }),
-  })
+  if (!supabaseUrl) {
+    throw new Error('NEXT_PUBLIC_SUPABASE_URL is not configured')
+  }
+
+  const functionUrl = `${supabaseUrl}/functions/v1/expand_biography_chapters`
+
+  console.log('[expandChapterBatch] Calling:', functionUrl, 'indices:', chapterIndices)
+
+  let response: Response
+  try {
+    response = await fetch(functionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        project_id: projectId,
+        outline_id: outlineId,
+        author_style: authorStyle,
+        chapter_indices: chapterIndices,
+      }),
+    })
+  } catch (fetchError: any) {
+    console.error('[expandChapterBatch] Fetch failed:', fetchError)
+    // Network error - Edge Function might not be deployed
+    throw new Error(
+      `无法连接到章节生成服务。请检查：\n` +
+      `1. Edge Function 'expand_biography_chapters' 是否已部署\n` +
+      `2. 网络连接是否正常\n` +
+      `原始错误: ${fetchError.message}`
+    )
+  }
 
   const responseText = await response.text()
   let result: any = {}
@@ -48,13 +68,16 @@ async function expandChapterBatch(
   try {
     result = responseText ? JSON.parse(responseText) : {}
   } catch {
-    throw new Error(`Invalid response: ${responseText.slice(0, 100)}`)
+    throw new Error(`服务器返回无效响应: ${responseText.slice(0, 100)}`)
   }
 
   if (!response.ok) {
-    throw new Error(result.error || `HTTP ${response.status}`)
+    const errorMsg = result.error || `HTTP ${response.status}`
+    console.error('[expandChapterBatch] API error:', errorMsg)
+    throw new Error(errorMsg)
   }
 
+  console.log('[expandChapterBatch] Success, chapters:', result.chapters?.length)
   return result.chapters || []
 }
 

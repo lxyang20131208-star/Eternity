@@ -6,8 +6,14 @@ import { usePathname } from 'next/navigation';
 export default function MainNav() {
   const pathname = usePathname();
 
+  // 这些页面不显示导航栏
+  const hideNavPaths = ['/landing', '/family', '/gift', '/demo'];
+  if (hideNavPaths.some(path => pathname === path || pathname.startsWith(path + '/'))) {
+    return null;
+  }
+
   const navItems = [
-    { href: '/', label: '🏠 首页', icon: '🏠' },
+    { href: '/main', label: '🏠 首页', icon: '🏠' },
     { href: '/family', label: '👥 人物', icon: '👥' },
     { href: '/timeline', label: '📅 时间轴', icon: '📅' },
     { href: '/places', label: '🗺️ 地图', icon: '🗺️' },
@@ -22,7 +28,7 @@ export default function MainNav() {
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2">
+          <Link href="/main" className="flex items-center gap-2">
             <span className="text-2xl">📚</span>
             <span className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
               永恒档案

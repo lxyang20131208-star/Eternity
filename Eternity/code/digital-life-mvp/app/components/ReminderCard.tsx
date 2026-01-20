@@ -51,7 +51,7 @@ export default function ReminderCard({
       case 'inactive':
         return '该添加新照片了';
       case 'contextual':
-        return reminder.context?.title || '上传相关照片';
+        return reminder.metadata?.title || '上传相关照片';
     }
   };
 
@@ -60,14 +60,14 @@ export default function ReminderCard({
       case 'welcome':
         return '上传照片让我们开始记录你的人生故事吧！';
       case 'inactive':
-        const days = reminder.context?.days_since_last_upload || 0;
+        const days = reminder.metadata?.days_since_last_upload || 0;
         return `你已经 ${days} 天没有上传照片了`;
       case 'contextual':
-        if (reminder.context?.person_name) {
-          return `不妨上传一些关于"${reminder.context.person_name}"的照片？`;
+        if (reminder.metadata?.person_name) {
+          return `不妨上传一些关于"${reminder.metadata.person_name}"的照片？`;
         }
-        if (reminder.context?.event_title) {
-          return `上传"${reminder.context.event_title}"的相关照片`;
+        if (reminder.metadata?.event_title) {
+          return `上传"${reminder.metadata.event_title}"的相关照片`;
         }
         return '添加相关照片';
     }

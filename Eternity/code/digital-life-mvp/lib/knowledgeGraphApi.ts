@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from './supabaseClient';
 import type {
   Person,
   Place,
@@ -13,9 +13,7 @@ import type {
   PeopleFilters,
 } from './types/knowledge-graph';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+// Using singleton `supabase` from `lib/supabaseClient` to avoid multiple GoTrueClient instances
 
 // ====================================
 // People API

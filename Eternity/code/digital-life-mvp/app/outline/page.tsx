@@ -108,24 +108,24 @@ export default function OutlinePage() {
               {userEmail || 'Not signed in'}
             </p>
           </div>
-          <Link href="/" style={{
+          <Link href="/main" style={{
             padding: '8px 12px',
             fontSize: 12,
             fontWeight: 600,
-            background: 'white',
+            background: 'var(--card)',
             color: '#667eea',
-            border: '1px solid #e2e8f0',
+            border: '1px solid var(--border)',
             borderRadius: 8,
           }}>← Back</Link>
         </div>
 
         {!userId ? (
-          <div style={{ padding: 24, background: 'white', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+          <div style={{ padding: 24, background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)' }}>
             Sign in to view outlines.
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16 }}>
-            <div style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: 12, padding: 12 }}>
+            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 12 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 8 }}>Versions</div>
               {loading ? (
                 <div style={{ fontSize: 12, color: '#64748b' }}>Loading...</div>
@@ -140,7 +140,7 @@ export default function OutlinePage() {
                       style={{
                         textAlign: 'left',
                         padding: '10px 12px',
-                        background: selected?.id === o.id ? '#eef2ff' : 'white',
+                        background: selected?.id === o.id ? '#FFF5EB' : 'white',
                         color: '#1e293b',
                         border: '1px solid #e2e8f0',
                         borderRadius: 8,
@@ -159,7 +159,7 @@ export default function OutlinePage() {
               )}
             </div>
 
-            <div style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: 12, padding: 16 }}>
+            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
               {!selected ? (
                 <div style={{ fontSize: 12, color: '#64748b' }}>Select a version to view.</div>
               ) : selected.status !== 'done' || !selected.outline_json ? (
@@ -189,7 +189,7 @@ export default function OutlinePage() {
 
                   <div style={{
                     padding: 12,
-                    background: '#f8fafc',
+                      background: 'var(--card)',
                     borderRadius: 8,
                     fontSize: 12,
                     color: '#64748b',
@@ -202,8 +202,8 @@ export default function OutlinePage() {
                   {selected.outline_json.sections.map((section, idx) => (
                     <div key={idx} style={{
                       padding: 16,
-                      background: 'white',
-                      border: '1px solid #e2e8f0',
+                      background: 'var(--card)',
+                      border: '1px solid var(--border)',
                       borderRadius: 12,
                     }}>
                       <h4 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 600, color: '#1e293b' }}>
@@ -222,8 +222,8 @@ export default function OutlinePage() {
                           {section.quotes.map((quote, qidx) => (
                             <div key={qidx} style={{
                               padding: 10,
-                              background: '#f8fafc',
-                              borderLeft: '3px solid #667eea',
+                                background: 'var(--card)',
+                                borderLeft: '3px solid #B89B72',
                               borderRadius: 4,
                               fontSize: 12,
                               fontStyle: 'italic',

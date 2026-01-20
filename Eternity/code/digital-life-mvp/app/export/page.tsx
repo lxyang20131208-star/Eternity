@@ -21,6 +21,14 @@ import { AUTHOR_STYLES, type AuthorStyle } from '@/lib/biographyOutlineApi';
 import { BiographyEditor } from '@/app/components/BiographyEditor';
 import { PRINT_PRESETS, generatePrintCSS, checkPDFReadiness, type PrintConfig } from '@/lib/printConfig';
 import { generateBookHTML } from '@/lib/bookGenerator';
+import { generatePaginatedBookHTML, type PaginationConfig } from '@/lib/pdfPagination';
+import {
+  generateVivliostyleHTML,
+  getAllChapterPhotos,
+  printToPDF,
+  type BookConfig,
+  type BookChapter,
+} from '@/lib/vivliostyleBookGenerator';
 
 // Helper: Convert rich content to HTML string
 function renderRichToHtml(content: RichTextContent | undefined, fallbackText: string): string {
@@ -47,6 +55,9 @@ function escapeHtml(text: string): string {
 const LOCAL_PHOTOS_KEY = 'photoFlow.photos';
 const LOCAL_NETWORK_KEY = 'familyNetwork.data';
 const LOCAL_OUTLINE_ATTACHMENTS_KEY = 'outlineAttachments';
+
+// Feature unlock threshold for Edit Biography
+const EDIT_BIO_UNLOCK_THRESHOLD = 80;
 
 interface PhotoItem {
   id: string;
@@ -81,7 +92,11 @@ interface AttachmentNote {
 export default function ExportPage() {
   // State: Auth & Project
   const [projectId, setProjectId] = useState<string | null>(null);
-  
+
+  // State: Unlock status
+  const [answeredCount, setAnsweredCount] = useState(0);
+  const [showLockModal, setShowLockModal] = useState(false);
+
   // State: Outline
   const [outlines, setOutlines] = useState<BiographyOutline[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
@@ -111,9 +126,16 @@ export default function ExportPage() {
   const [showPrintSettings, setShowPrintSettings] = useState(false);
   const [showPreflightCheck, setShowPreflightCheck] = useState(false);
   const [bookTitle, setBookTitle] = useState('我的传记');
+  const [authorName, setAuthorName] = useState('');
   const [generatingTitle, setGeneratingTitle] = useState(false);
   const [showTitleSuggestions, setShowTitleSuggestions] = useState(false);
   const [titleSuggestions, setTitleSuggestions] = useState<Array<{ title: string; description: string }>>([]);
+
+  // 导出引擎选择
+  type ExportEngine = 'vivliostyle' | 'html2canvas';
+  const [exportEngine, setExportEngine] = useState<ExportEngine>('vivliostyle');
+  const [photosPerChapter, setPhotosPerChapter] = useState(3);
+  const [photoSize, setPhotoSize] = useState<'small' | 'medium' | 'large'>('medium');
 
   // Template configurations
   const templateConfig: Record<BookTemplate, { name: string; icon: string; description: string; colors: { primary: string; secondary: string } }> = {
@@ -167,6 +189,18 @@ export default function ExportPage() {
         const pid = list?.[0]?.id;
         if (pid) {
           setProjectId(pid);
+
+          // Get answered count for unlock check
+          const { data: answers } = await supabase
+            .from('answer_sessions')
+            .select('question_id')
+            .eq('project_id', pid);
+
+          if (answers) {
+            // Count unique question_ids (main questions only)
+            const uniqueQuestions = new Set(answers.map(a => a.question_id));
+            setAnsweredCount(uniqueQuestions.size);
+          }
         }
       } catch (err) {
         console.error('Auth init failed:', err);
@@ -406,11 +440,30 @@ export default function ExportPage() {
   };
 
   // Helper: Generate safe filename from book title
+  // Supabase Storage requires ASCII-safe filenames without special characters
   const generateSafeFileName = (title: string): string => {
-    return title
-      .replace(/[\\/:*?"<>|]/g, '_') // Replace invalid filename chars
+    // First, try to transliterate common Chinese characters or use a hash
+    // For now, we'll use a simple approach: keep only alphanumeric and replace others
+    const sanitized = title
+      .replace(/[^\w\u4e00-\u9fa5]/g, '_') // Keep alphanumeric and Chinese
       .replace(/\s+/g, '_') // Replace spaces with underscore
       .substring(0, 50); // Limit length
+
+    // For Supabase Storage path, we need ASCII-only names
+    // Use encodeURIComponent but replace % with _ for cleaner names
+    return sanitized;
+  };
+
+  // Helper: Generate storage-safe path (ASCII only for Supabase)
+  const generateStorageSafePath = (fileName: string): string => {
+    // Remove or replace non-ASCII characters for storage path
+    return fileName
+      .replace(/[^\x00-\x7F]/g, '') // Remove non-ASCII (Chinese, etc.)
+      .replace(/[\\/:*?"<>|]/g, '_') // Replace invalid chars
+      .replace(/\s+/g, '_') // Replace spaces
+      .replace(/_+/g, '_') // Collapse multiple underscores
+      .replace(/^_|_$/g, '') // Remove leading/trailing underscores
+      || 'biography'; // Fallback if empty
   };
 
   // AI Generate Book Title
@@ -436,7 +489,16 @@ export default function ExportPage() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to generate title');
+        let errBody = null
+        try {
+          errBody = await response.json()
+        } catch (e) {
+          // ignore parse errors
+        }
+        const serverMsg = errBody?.error || errBody?.message || `Status ${response.status}`
+        console.error('Title generation failed (server):', serverMsg)
+        alert(`生成书名失败: ${serverMsg}`)
+        return
       }
 
       const data = await response.json();
@@ -462,9 +524,9 @@ export default function ExportPage() {
       return;
     }
 
-    // If we have expanded chapters, use the professional book export
+    // If we have expanded chapters, use the selected export engine
     if (expandedChapters && expandedChapters.length > 0) {
-      await handleBookExport();
+      await handleSmartExport();
       return;
     }
 
@@ -680,19 +742,21 @@ export default function ExportPage() {
 
       const safeTitle = generateSafeFileName(bookTitle);
       const fileName = `${safeTitle}_v${selectedVersion}_${template}.pdf`;
-      
+
       // Get PDF as blob
       const pdfBlob = pdf.output('blob');
-      
+
       // Try to upload to Supabase Storage
       let uploadSuccess = false;
       try {
         const { data: { session } } = await supabase.auth.getSession();
         console.log('📤 开始上传PDF，用户登录状态:', !!session, '项目ID:', projectId);
-        
+
         if (session && projectId) {
           const timestamp = Date.now();
-          const storagePath = `pdfs/${projectId}/${timestamp}_${fileName}`;
+          // Use ASCII-safe path for Supabase Storage
+          const safeStorageName = generateStorageSafePath(`${safeTitle}_v${selectedVersion}_${template}`);
+          const storagePath = `pdfs/${projectId}/${timestamp}_${safeStorageName}.pdf`;
           
           const { data: uploadData, error: uploadError } = await supabase.storage
             .from('biography-exports')
@@ -759,6 +823,7 @@ export default function ExportPage() {
   };
 
   // Professional book-style PDF export using expanded chapters
+  // Uses smart pagination to ensure paragraphs are never cut off
   const handleBookExport = async () => {
     if (!expandedChapters || expandedChapters.length === 0) {
       alert('请先生成完整传记文本');
@@ -770,21 +835,32 @@ export default function ExportPage() {
     setStatusMessage('正在生成专业排版的传记...');
 
     try {
-      // Step 1: Generate book HTML with print config
+      // Step 1: Prepare pagination config from print config
       setProgress(10);
-      setStatusMessage('正在应用印刷排版规则...');
+      setStatusMessage('正在计算智能分页...');
       await new Promise((resolve) => setTimeout(resolve, 200));
 
       const chapters = expandedChapters.map((ch) => ({
         title: ch.title,
-        content: ch.expandedText || ch.originalBullets.join('\n\n'),
+        content: ch.content,
       }));
 
-      // Generate CSS
-      const cssStyles = generatePrintCSS(printConfig, bookTitle);
-      
-      // Generate HTML
-      const bookHtml = generateBookHTML(printConfig, bookTitle, chapters, cssStyles);
+      // Convert PrintConfig to PaginationConfig
+      const paginationConfig: PaginationConfig = {
+        pageWidth: printConfig.pageSize.width,
+        pageHeight: printConfig.pageSize.height,
+        marginTop: printConfig.margins.top,
+        marginBottom: printConfig.margins.bottom,
+        marginInner: printConfig.margins.inner,
+        marginOuter: printConfig.margins.outer,
+        fontSize: printConfig.body.fontSize,
+        lineHeight: printConfig.body.lineHeight,
+        chapterTopSpacing: printConfig.chapter.topSpacing,
+        chapterTitleHeight: 25, // Estimated height for chapter title block
+      };
+
+      // Generate paginated HTML using smart pagination engine
+      const bookHtml = generatePaginatedBookHTML(chapters, paginationConfig, bookTitle);
 
       // Step 2: Create hidden iframe for rendering
       setProgress(20);
@@ -792,8 +868,8 @@ export default function ExportPage() {
       const iframe = document.createElement('iframe');
       iframe.style.position = 'absolute';
       iframe.style.left = '-9999px';
-      iframe.style.width = `${printConfig.pageSize.width + printConfig.pageSize.bleed * 2}mm`;
-      iframe.style.height = `${printConfig.pageSize.height + printConfig.pageSize.bleed * 2}mm`;
+      iframe.style.width = `${printConfig.pageSize.width}mm`;
+      iframe.style.height = `${printConfig.pageSize.height}mm`;
       document.body.appendChild(iframe);
 
       const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
@@ -809,8 +885,8 @@ export default function ExportPage() {
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
       // Step 3: Create PDF with correct dimensions
-      const pageWidthMm = printConfig.pageSize.width + printConfig.pageSize.bleed * 2;
-      const pageHeightMm = printConfig.pageSize.height + printConfig.pageSize.bleed * 2;
+      const pageWidthMm = printConfig.pageSize.width;
+      const pageHeightMm = printConfig.pageSize.height;
 
       const pdf = new jsPDF({
         orientation: pageHeightMm > pageWidthMm ? 'portrait' : 'landscape',
@@ -866,19 +942,21 @@ export default function ExportPage() {
       const presetName = printPreset.replace('Standard', '').toUpperCase();
       const styleName = AUTHOR_STYLES[selectedAuthorStyle]?.nameEn || 'default';
       const fileName = `${safeTitle}_${presetName}_${styleName}_v${selectedVersion}.pdf`;
-      
+
       // Get PDF as blob
       const pdfBlob = pdf.output('blob');
-      
+
       // Try to upload to Supabase Storage
       let uploadSuccess = false;
       try {
         const { data: { session } } = await supabase.auth.getSession();
         console.log('📤 开始上传PDF，用户登录状态:', !!session, '项目ID:', projectId);
-        
+
         if (session && projectId) {
           const timestamp = Date.now();
-          const storagePath = `pdfs/${projectId}/${timestamp}_${fileName}`;
+          // Use ASCII-safe path for Supabase Storage
+          const safeStorageName = generateStorageSafePath(`${safeTitle}_${presetName}_${styleName}_v${selectedVersion}`);
+          const storagePath = `pdfs/${projectId}/${timestamp}_${safeStorageName}.pdf`;
           
           const { data: uploadData, error: uploadError } = await supabase.storage
             .from('biography-exports')
@@ -944,6 +1022,128 @@ export default function ExportPage() {
     }
   };
 
+  // Vivliostyle 专业排版导出（支持图片）
+  const handleVivliostyleExport = async () => {
+    if (!expandedChapters || expandedChapters.length === 0) {
+      alert('请先生成完整传记文本');
+      return;
+    }
+
+    if (!projectId) {
+      alert('项目ID未找到');
+      return;
+    }
+
+    setExporting(true);
+    setProgress(0);
+    setStatusMessage('正在准备 Vivliostyle 专业排版...');
+
+    try {
+      // Step 1: 准备章节数据（包含 source_ids）
+      setProgress(10);
+      setStatusMessage('正在解析章节数据...');
+
+      const bookChapters: BookChapter[] = expandedChapters.map((ch, idx) => {
+        // 从 outline 获取 source_ids
+        const outlineSection = selectedOutline?.outline_json?.sections?.[idx];
+        return {
+          title: ch.title,
+          content: ch.content,
+          sourceIds: outlineSection?.source_ids || [],
+        };
+      });
+
+      // Step 2: 获取关联照片
+      setProgress(30);
+      setStatusMessage('正在获取关联照片...');
+
+      let chapterPhotos = new Map<number, any[]>();
+      if (includePhotos) {
+        chapterPhotos = await getAllChapterPhotos(projectId, bookChapters);
+        const totalPhotos = Array.from(chapterPhotos.values()).reduce((sum, arr) => sum + arr.length, 0);
+        console.log(`📷 找到 ${totalPhotos} 张关联照片`);
+      }
+
+      // Step 3: 生成配置
+      setProgress(50);
+      setStatusMessage('正在生成排版配置...');
+
+      const pageSize = printPreset === 'a5Standard' ? 'A5' : 'A4';
+      const bookConfig: BookConfig = {
+        title: bookTitle,
+        subtitle: AUTHOR_STYLES[selectedAuthorStyle]?.name || '家族传记',
+        author: authorName,
+        pageSize: pageSize,
+        fontSize: printConfig.body.fontSize,
+        lineHeight: printConfig.body.lineHeight,
+        margins: {
+          top: printConfig.margins.top,
+          bottom: printConfig.margins.bottom,
+          inner: printConfig.margins.inner,
+          outer: printConfig.margins.outer,
+        },
+        includePhotos: includePhotos,
+        photosPerChapter: photosPerChapter,
+        photoSize: photoSize,
+      };
+
+      // Step 4: 生成 HTML
+      setProgress(70);
+      setStatusMessage('正在生成书籍 HTML...');
+
+      // 调试：输出章节数据
+      console.log('[Vivliostyle] 章节数量:', bookChapters.length);
+      console.log('[Vivliostyle] 第一章标题:', bookChapters[0]?.title);
+      console.log('[Vivliostyle] 第一章内容长度:', bookChapters[0]?.content?.length);
+
+      const bookHtml = generateVivliostyleHTML(bookConfig, bookChapters, chapterPhotos);
+
+      // 调试：输出生成的 HTML 信息
+      console.log('[Vivliostyle] HTML 长度:', bookHtml.length);
+      console.log('[Vivliostyle] HTML 开头:', bookHtml.substring(0, 500));
+
+      // Step 5: 打开打印预览
+      setProgress(90);
+      setStatusMessage('正在打开打印预览...');
+
+      // 使用浏览器原生打印功能（支持 CSS Paged Media）
+      printToPDF(bookHtml);
+
+      setProgress(100);
+      setStatusMessage('✅ 已打开打印预览！');
+
+      setTimeout(() => {
+        setExporting(false);
+        setProgress(0);
+        setStatusMessage('');
+        alert(
+          '📖 Vivliostyle 排版预览已打开！\n\n' +
+          '请在打印对话框中：\n' +
+          '1. 选择"另存为 PDF"作为目标打印机\n' +
+          '2. 确保边距设置为"无"或"最小"\n' +
+          '3. 点击"保存"导出 PDF\n\n' +
+          '提示：此方式使用 CSS Paged Media 规范，确保段落不被截断。'
+        );
+      }, 500);
+
+    } catch (error) {
+      console.error('Vivliostyle export failed:', error);
+      alert('导出失败: ' + (error as Error).message);
+      setExporting(false);
+      setProgress(0);
+      setStatusMessage('');
+    }
+  };
+
+  // 统一导出入口
+  const handleSmartExport = async () => {
+    if (exportEngine === 'vivliostyle') {
+      await handleVivliostyleExport();
+    } else {
+      await handleBookExport();
+    }
+  };
+
   const stats = getStats();
 
   // Build quick lookup tables for attachments and photos
@@ -975,14 +1175,7 @@ export default function ExportPage() {
           }
         }
       `}</style>
-      <div
-        style={{
-          minHeight: '100vh',
-          background: 'linear-gradient(to bottom right, #000814, #001d3d)',
-          color: '#fff',
-          padding: 20,
-        }}
-      >
+      <div className="detroit-bg" style={{ minHeight: '100vh', padding: 20, color: 'var(--text-primary)' }}>
       {/* Header */}
       <div
         style={{
@@ -996,7 +1189,7 @@ export default function ExportPage() {
           <h1 style={{ fontSize: 26, fontWeight: 600, marginBottom: 6 }}>
             📖 电子书导出引擎
           </h1>
-          <p style={{ fontSize: 13, color: 'rgba(255, 255, 255, 0.7)' }}>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
             Inspired by Bookwright & Affinity Publisher
           </p>
         </div>
@@ -1011,10 +1204,10 @@ export default function ExportPage() {
               textDecoration: 'none',
             }}
           >
-            ← 返回标注
+            ← 返回审阅大纲
           </Link>
           <Link
-            href="/"
+            href="/main"
             className="cyber-btn"
             style={{
               padding: '8px 14px',
@@ -1033,15 +1226,15 @@ export default function ExportPage() {
         {/* Left: Version Selector */}
         <div
           style={{
-            background: 'rgba(255, 255, 255, 0.04)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            background: 'var(--card)',
+            border: '1px solid var(--border)',
             borderRadius: 8,
             padding: 16,
             maxHeight: '80vh',
             overflowY: 'auto',
           }}
         >
-          <h3 style={{ fontSize: 14, marginBottom: 12, color: '#00d4ff' }}>
+          <h3 style={{ fontSize: 14, marginBottom: 12, color: 'var(--accent-cyan)' }}>
             选择大纲版本
           </h3>
           {outlines.map((o) => (
@@ -1054,14 +1247,14 @@ export default function ExportPage() {
                 marginBottom: 8,
                 background:
                   selectedVersion === o.version
-                    ? 'rgba(0, 212, 255, 0.15)'
-                    : 'rgba(255, 255, 255, 0.03)',
+                    ? 'rgba(0, 212, 255, 0.12)'
+                    : 'var(--card)',
                 border:
                   selectedVersion === o.version
-                    ? '1px solid rgba(0, 212, 255, 0.5)'
-                    : '1px solid rgba(255, 255, 255, 0.08)',
+                    ? '1px solid rgba(0, 212, 255, 0.35)'
+                    : '1px solid rgba(31, 31, 31, 0.06)',
                 borderRadius: 6,
-                color: selectedVersion === o.version ? '#00d4ff' : '#fff',
+                color: selectedVersion === o.version ? '#00d4ff' : 'var(--text-primary)',
                 fontSize: 13,
                 textAlign: 'left',
                 cursor: 'pointer',
@@ -1075,7 +1268,7 @@ export default function ExportPage() {
             </button>
           ))}
           {outlines.length === 0 && (
-            <p style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.7)' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
               暂无大纲数据
             </p>
           )}
@@ -1085,14 +1278,14 @@ export default function ExportPage() {
             style={{
               marginTop: 16,
               padding: 12,
-              background: 'rgba(255, 255, 255, 0.03)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
               borderRadius: 6,
               fontSize: 11,
-              color: 'rgba(255, 255, 255, 0.6)',
+              color: 'var(--text-secondary)',
             }}
           >
-            <div style={{ marginBottom: 8, fontWeight: 600, color: 'rgba(255, 255, 255, 0.8)' }}>
+            <div style={{ marginBottom: 8, fontWeight: 600, color: 'var(--text-primary)' }}>
               需要修改内容？
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1136,7 +1329,7 @@ export default function ExportPage() {
                     <div style={{ color: '#fff', marginBottom: 4, fontWeight: 500 }}>
                       v{pdf.version} · {pdf.template}
                     </div>
-                    <div style={{ color: 'rgba(255, 255, 255, 0.5)', marginBottom: 6 }}>
+                    <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}>
                       {new Date(pdf.createdAt).toLocaleString()}
                     </div>
                     <a
@@ -1166,7 +1359,7 @@ export default function ExportPage() {
                   </div>
                 ))}
                 {pdfHistory.length > 5 && (
-                  <div style={{ fontSize: 10, color: 'rgba(255, 255, 255, 0.5)', textAlign: 'center', marginTop: 4 }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', marginTop: 4 }}>
                     +{pdfHistory.length - 5} 个更多
                   </div>
                 )}
@@ -1178,8 +1371,8 @@ export default function ExportPage() {
         {/* Center: Export Settings */}
         <div
           style={{
-            background: 'rgba(255, 255, 255, 0.04)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+              background: 'rgba(31, 31, 31, 0.04)',
+              border: '1px solid rgba(31, 31, 31, 0.12)',
             borderRadius: 8,
             padding: 24,
             maxHeight: '80vh',
@@ -1203,7 +1396,7 @@ export default function ExportPage() {
             </h4>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
               <div>
-                <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.7)' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                   章节数量
                 </div>
                 <div style={{ fontSize: 20, fontWeight: 600, color: '#00d4ff' }}>
@@ -1211,7 +1404,7 @@ export default function ExportPage() {
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.7)' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                   照片数量
                 </div>
                 <div style={{ fontSize: 20, fontWeight: 600, color: '#00d4ff' }}>
@@ -1219,7 +1412,7 @@ export default function ExportPage() {
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.7)' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                   家族成员
                 </div>
                 <div style={{ fontSize: 20, fontWeight: 600, color: '#00d4ff' }}>
@@ -1227,7 +1420,7 @@ export default function ExportPage() {
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.7)' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                   照片标注
                 </div>
                 <div style={{ fontSize: 20, fontWeight: 600, color: '#00d4ff' }}>
@@ -1254,7 +1447,7 @@ export default function ExportPage() {
             <h4 style={{ fontSize: 14, marginBottom: 12, color: expandedChapters ? '#22c55e' : '#fbbf24' }}>
               {expandedChapters ? '✅ 完整传记已生成' : '📝 生成完整传记文本'}
             </h4>
-            <p style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.7)', marginBottom: 12 }}>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>
               {expandedChapters
                 ? `已生成 ${expandedChapters.length} 章完整传记，使用「${AUTHOR_STYLES[selectedAuthorStyle]?.name || '默认'}」风格`
                 : '将大纲要点扩展成完整的传记文本，带有专业作家的文学风格'}
@@ -1262,7 +1455,7 @@ export default function ExportPage() {
 
             {/* Author Style Selection */}
             <div style={{ marginBottom: 12 }}>
-              <label style={{ display: 'block', fontSize: 12, marginBottom: 6, color: 'rgba(255, 255, 255, 0.8)' }}>
+              <label style={{ display: 'block', fontSize: 12, marginBottom: 6, color: 'var(--text-primary)' }}>
                 选择文学风格：
               </label>
               <select
@@ -1274,9 +1467,9 @@ export default function ExportPage() {
                   padding: '8px 12px',
                   fontSize: 13,
                   borderRadius: 6,
-                  border: '1px solid rgba(255, 255, 255, 0.2)',
-                  background: 'rgba(0, 0, 0, 0.3)',
-                  color: '#fff',
+                  border: '1px solid var(--border)',
+                  background: 'var(--card)',
+                  color: 'var(--text-primary)',
                   cursor: expanding ? 'not-allowed' : 'pointer',
                 }}
               >
@@ -1299,7 +1492,7 @@ export default function ExportPage() {
                 borderRadius: 6,
                 border: 'none',
                 background: expanding
-                  ? 'rgba(255, 255, 255, 0.1)'
+                  ? 'rgba(31, 31, 31, 0.06)'
                   : expandedChapters
                     ? 'linear-gradient(135deg, #22c55e, #16a34a)'
                     : 'linear-gradient(135deg, #fbbf24, #f59e0b)',
@@ -1313,23 +1506,42 @@ export default function ExportPage() {
 
             {expandedChapters && (
               <div style={{ marginTop: 12 }}>
-                <button
-                  onClick={() => setShowEditor(true)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 16px',
-                    fontSize: 13,
-                    background: 'rgba(99, 102, 241, 0.2)',
-                    border: '1px solid rgba(99, 102, 241, 0.4)',
-                    borderRadius: 6,
-                    color: '#a5b4fc',
-                    cursor: 'pointer',
-                    marginBottom: 8,
-                  }}
-                >
-                  ✏️ 编辑传记内容（纠正人名/删除段落）
-                </button>
-                <p style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.5)', textAlign: 'center', margin: 0 }}>
+                {answeredCount >= EDIT_BIO_UNLOCK_THRESHOLD ? (
+                  <button
+                    onClick={() => setShowEditor(true)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 16px',
+                      fontSize: 13,
+                      background: 'rgba(99, 102, 241, 0.2)',
+                      border: '1px solid rgba(99, 102, 241, 0.4)',
+                      borderRadius: 6,
+                      color: '#a5b4fc',
+                      cursor: 'pointer',
+                      marginBottom: 8,
+                    }}
+                  >
+                    ✏️ 编辑传记内容（纠正人名/删除段落）
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setShowLockModal(true)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 16px',
+                      fontSize: 13,
+                      background: 'rgba(100, 116, 139, 0.2)',
+                      border: '1px solid rgba(100, 116, 139, 0.3)',
+                      borderRadius: 6,
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      marginBottom: 8,
+                    }}
+                  >
+                    ✏️ 编辑传记内容 🔒
+                  </button>
+                )}
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', margin: 0 }}>
                   点击「开始导出」将使用专业书籍排版
                 </p>
               </div>
@@ -1351,13 +1563,13 @@ export default function ExportPage() {
                     background:
                       template === t
                         ? 'rgba(0, 212, 255, 0.15)'
-                        : 'rgba(255, 255, 255, 0.03)',
+                        : 'var(--card)',
                     border:
                       template === t
                         ? '1px solid rgba(0, 212, 255, 0.5)'
-                        : '1px solid rgba(255, 255, 255, 0.08)',
+                        : '1px solid var(--border)',
                     borderRadius: 6,
-                    color: template === t ? '#00d4ff' : '#fff',
+                    color: template === t ? '#00d4ff' : 'var(--text-primary)',
                     fontSize: 11,
                     cursor: 'pointer',
                     transition: 'all 0.2s',
@@ -1388,13 +1600,13 @@ export default function ExportPage() {
                   background:
                     exportFormat === 'pdf'
                       ? 'rgba(0, 212, 255, 0.15)'
-                      : 'rgba(255, 255, 255, 0.03)',
+                      : 'var(--card)',
                   border:
                     exportFormat === 'pdf'
                       ? '1px solid rgba(0, 212, 255, 0.5)'
-                      : '1px solid rgba(255, 255, 255, 0.08)',
+                      : '1px solid var(--border)',
                   borderRadius: 6,
-                  color: exportFormat === 'pdf' ? '#00d4ff' : '#fff',
+                  color: exportFormat === 'pdf' ? '#00d4ff' : 'var(--text-primary)',
                   fontSize: 13,
                   cursor: 'pointer',
                   transition: 'all 0.2s',
@@ -1409,13 +1621,13 @@ export default function ExportPage() {
                   background:
                     exportFormat === 'epub'
                       ? 'rgba(0, 212, 255, 0.15)'
-                      : 'rgba(255, 255, 255, 0.03)',
+                      : 'var(--card)',
                   border:
                     exportFormat === 'epub'
                       ? '1px solid rgba(0, 212, 255, 0.5)'
-                      : '1px solid rgba(255, 255, 255, 0.08)',
+                      : '1px solid var(--border)',
                   borderRadius: 6,
-                  color: exportFormat === 'epub' ? '#00d4ff' : '#fff',
+                  color: exportFormat === 'epub' ? '#00d4ff' : 'var(--text-primary)',
                   fontSize: 13,
                   cursor: 'pointer',
                   transition: 'all 0.2s',
@@ -1449,13 +1661,13 @@ export default function ExportPage() {
                         background:
                           printPreset === preset
                             ? 'rgba(139, 92, 246, 0.15)'
-                            : 'rgba(255, 255, 255, 0.03)',
+                            : 'var(--card)',
                         border:
                           printPreset === preset
                             ? '1px solid rgba(139, 92, 246, 0.5)'
-                            : '1px solid rgba(255, 255, 255, 0.08)',
+                            : '1px solid var(--border)',
                         borderRadius: 6,
-                        color: printPreset === preset ? '#a78bfa' : '#fff',
+                        color: printPreset === preset ? '#a78bfa' : 'var(--text-primary)',
                         fontSize: 11,
                         cursor: 'pointer',
                         transition: 'all 0.2s',
@@ -1481,7 +1693,7 @@ export default function ExportPage() {
                   border: '1px solid rgba(139, 92, 246, 0.2)',
                   borderRadius: 6,
                   fontSize: 10,
-                  color: 'rgba(255, 255, 255, 0.7)',
+                    color: 'var(--text-secondary)',
                 }}
               >
                 <div>✓ {printConfig.pageSize.bleed > 0 ? `含${printConfig.pageSize.bleed}mm出血` : '无出血'}</div>
@@ -1507,6 +1719,140 @@ export default function ExportPage() {
             </div>
           )}
 
+          {/* Export Engine Selection */}
+          {exportFormat === 'pdf' && expandedChapters && (
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', fontSize: 14, marginBottom: 8 }}>
+                🔧 导出引擎
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+                <button
+                  onClick={() => setExportEngine('vivliostyle')}
+                  style={{
+                    padding: '12px 10px',
+                    background: exportEngine === 'vivliostyle' ? 'rgba(16, 185, 129, 0.15)' : 'var(--card)',
+                    border: exportEngine === 'vivliostyle' ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid var(--border)',
+                    borderRadius: 6,
+                    color: exportEngine === 'vivliostyle' ? '#10b981' : 'var(--text-primary)',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <div style={{ fontWeight: 600 }}>📖 Vivliostyle（推荐）</div>
+                  <div style={{ fontSize: 10, opacity: 0.7, marginTop: 4 }}>
+                    专业排版引擎，支持图片插入，段落不截断
+                  </div>
+                </button>
+                <button
+                  onClick={() => setExportEngine('html2canvas')}
+                  style={{
+                    padding: '12px 10px',
+                    background: exportEngine === 'html2canvas' ? 'rgba(59, 130, 246, 0.15)' : 'var(--card)',
+                    border: exportEngine === 'html2canvas' ? '1px solid rgba(59, 130, 246, 0.5)' : '1px solid var(--border)',
+                    borderRadius: 6,
+                    color: exportEngine === 'html2canvas' ? '#3b82f6' : 'var(--text-primary)',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <div style={{ fontWeight: 600 }}>🖼️ 图片渲染</div>
+                  <div style={{ fontSize: 10, opacity: 0.7, marginTop: 4 }}>
+                    逐页截图生成，兼容性更好
+                  </div>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Photo Settings (only for Vivliostyle) */}
+          {exportFormat === 'pdf' && expandedChapters && exportEngine === 'vivliostyle' && (
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', fontSize: 14, marginBottom: 8 }}>
+                📷 照片设置
+              </label>
+              <div style={{
+                padding: 12,
+                background: 'var(--card)',
+                border: '1px solid var(--border)',
+                borderRadius: 6,
+              }}>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+                    <input
+                      type="checkbox"
+                      id="includePhotos"
+                      checked={includePhotos}
+                      onChange={(e) => setIncludePhotos(e.target.checked)}
+                      style={{ marginRight: 8 }}
+                    />
+                    <label htmlFor="includePhotos" style={{ fontSize: 12 }}>
+                      自动插入关联照片
+                    </label>
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginLeft: 20 }}>
+                    系统会根据问题关联自动将照片插入对应章节
+                  </div>
+                </div>
+
+                {includePhotos && (
+                  <>
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
+                        每章最多照片数
+                      </label>
+                      <select
+                        value={photosPerChapter}
+                        onChange={(e) => setPhotosPerChapter(Number(e.target.value))}
+                        style={{
+                          width: '100%',
+                          padding: '8px 10px',
+                          background: 'var(--bg)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 4,
+                          color: 'var(--text-primary)',
+                          fontSize: 12,
+                        }}
+                      >
+                        <option value={1}>1张</option>
+                        <option value={2}>2张</option>
+                        <option value={3}>3张（推荐）</option>
+                        <option value={5}>5张</option>
+                        <option value={10}>10张</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
+                        照片尺寸
+                      </label>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {(['small', 'medium', 'large'] as const).map((size) => (
+                          <button
+                            key={size}
+                            onClick={() => setPhotoSize(size)}
+                            style={{
+                              flex: 1,
+                              padding: '6px 8px',
+                              background: photoSize === size ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg)',
+                              border: photoSize === size ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid var(--border)',
+                              borderRadius: 4,
+                              color: photoSize === size ? '#10b981' : 'var(--text-primary)',
+                              fontSize: 11,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {size === 'small' ? '小' : size === 'medium' ? '中' : '大'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Book Title Input */}
           <div style={{ marginBottom: 24 }}>
             <label style={{ display: 'block', fontSize: 14, marginBottom: 8 }}>
@@ -1520,25 +1866,25 @@ export default function ExportPage() {
               style={{
                 width: '100%',
                 padding: '12px 14px',
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
+                background: 'var(--card)',
+                border: '1px solid var(--border)',
                 borderRadius: 6,
-                color: '#fff',
+                color: 'var(--text-primary)',
                 fontSize: 13,
                 outline: 'none',
                 transition: 'all 0.2s',
               }}
               onFocus={(e) => {
-                e.target.style.background = 'rgba(255, 255, 255, 0.08)';
+                e.target.style.background = 'var(--card)';
                 e.target.style.borderColor = 'rgba(0, 212, 255, 0.5)';
               }}
               onBlur={(e) => {
-                e.target.style.background = 'rgba(255, 255, 255, 0.05)';
-                e.target.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                e.target.style.background = 'var(--card)';
+                e.target.style.borderColor = 'var(--border)';
               }}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-              <p style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.5)', margin: 0, flex: 1 }}>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0, flex: 1 }}>
                 此书名将显示在PDF封面和页眉中
               </p>
               <button
@@ -1547,7 +1893,7 @@ export default function ExportPage() {
                 style={{
                   padding: '6px 12px',
                   background: generatingTitle 
-                    ? 'rgba(255, 255, 255, 0.1)' 
+                    ? 'rgba(31, 31, 31, 0.06)' 
                     : 'linear-gradient(135deg, #667eea, #764ba2)',
                   border: 'none',
                   borderRadius: 4,
@@ -1605,7 +1951,7 @@ export default function ExportPage() {
                     style={{
                       background: 'none',
                       border: 'none',
-                      color: 'rgba(255, 255, 255, 0.5)',
+                      color: 'var(--text-muted)',
                       cursor: 'pointer',
                       fontSize: 16,
                       padding: 0,
@@ -1625,10 +1971,10 @@ export default function ExportPage() {
                       }}
                       style={{
                         padding: '10px 12px',
-                        background: 'rgba(255, 255, 255, 0.05)',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        background: 'var(--card)',
+                        border: '1px solid var(--border)',
                         borderRadius: 4,
-                        color: '#fff',
+                        color: 'var(--text-primary)',
                         fontSize: 12,
                         textAlign: 'left',
                         cursor: 'pointer',
@@ -1639,13 +1985,13 @@ export default function ExportPage() {
                         e.currentTarget.style.borderColor = 'rgba(102, 126, 234, 0.4)';
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                        e.currentTarget.style.background = 'rgba(31, 31, 31, 0.05)';
+                        e.currentTarget.style.borderColor = 'rgba(31, 31, 31, 0.12)';
                       }}
                     >
                       <div style={{ fontWeight: 600, marginBottom: 4 }}>{suggestion.title}</div>
                       {suggestion.description && (
-                        <div style={{ fontSize: 10, color: 'rgba(255, 255, 255, 0.6)' }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
                           {suggestion.description}
                         </div>
                       )}
@@ -1654,6 +2000,39 @@ export default function ExportPage() {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Author Name Input */}
+          <div style={{ marginBottom: 24 }}>
+            <label style={{ display: 'block', fontSize: 14, marginBottom: 8 }}>
+              ✍️ 作者署名
+            </label>
+            <input
+              type="text"
+              value={authorName}
+              onChange={(e) => setAuthorName(e.target.value)}
+              placeholder="请输入作者署名（可选）"
+              style={{
+                width: '100%',
+                padding: '12px 14px',
+                background: 'var(--card)',
+                border: '1px solid var(--border)',
+                borderRadius: 6,
+                color: 'var(--text-primary)',
+                fontSize: 13,
+                outline: 'none',
+                transition: 'all 0.2s',
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = 'rgba(0, 212, 255, 0.5)';
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = 'var(--border)';
+              }}
+            />
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+              此署名将显示在PDF封面的书名下方
+            </p>
           </div>
 
           {/* Options */}
@@ -1677,8 +2056,8 @@ export default function ExportPage() {
                   alignItems: 'center',
                   padding: '10px 12px',
                   marginBottom: 8,
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  background: 'var(--card)',
+                  border: '1px solid var(--border)',
                   borderRadius: 6,
                   cursor: 'pointer',
                   fontSize: 13,
@@ -1745,7 +2124,7 @@ export default function ExportPage() {
                 style={{
                   width: '100%',
                   height: 8,
-                  background: 'rgba(255, 255, 255, 0.1)',
+                  background: 'rgba(31, 31, 31, 0.06)',
                   borderRadius: 4,
                   overflow: 'hidden',
                 }}
@@ -1763,7 +2142,7 @@ export default function ExportPage() {
                 style={{
                   marginTop: 8,
                   fontSize: 12,
-                  color: 'rgba(255, 255, 255, 0.7)',
+                  color: 'var(--text-secondary)',
                   textAlign: 'center',
                 }}
               >
@@ -1776,8 +2155,8 @@ export default function ExportPage() {
         {/* Right: Preview */}
         <div
           style={{
-            background: 'rgba(255, 255, 255, 0.04)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            background: 'var(--card)',
+            border: '1px solid var(--border)',
             borderRadius: 8,
             padding: 16,
             maxHeight: '80vh',
@@ -1793,13 +2172,13 @@ export default function ExportPage() {
                 style={{
                   fontSize: 13,
                   padding: '8px 10px',
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  background: 'var(--card)',
+                  border: '1px solid var(--border)',
                   borderRadius: 6,
                   marginBottom: 12,
                 }}
               >
-                <div style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: 11 }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
                   版本
                 </div>
                 <div style={{ fontWeight: 600 }}>{selectedOutline.version}</div>
@@ -1809,13 +2188,13 @@ export default function ExportPage() {
                 style={{
                   fontSize: 13,
                   padding: '8px 10px',
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  background: 'var(--card)',
+                  border: '1px solid var(--border)',
                   borderRadius: 6,
                   marginBottom: 12,
                 }}
               >
-                <div style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: 11 }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
                   模板
                 </div>
                 <div style={{ fontWeight: 600 }}>
@@ -1827,13 +2206,13 @@ export default function ExportPage() {
                 style={{
                   fontSize: 13,
                   padding: '8px 10px',
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  background: 'var(--card)',
+                  border: '1px solid var(--border)',
                   borderRadius: 6,
                   marginBottom: 12,
                 }}
               >
-                <div style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: 11 }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
                   格式
                 </div>
                 <div style={{ fontWeight: 600 }}>{exportFormat.toUpperCase()}</div>
@@ -1843,7 +2222,7 @@ export default function ExportPage() {
                 <div
                   style={{
                     fontSize: 12,
-                    color: 'rgba(255, 255, 255, 0.7)',
+                    color: 'var(--text-secondary)',
                     marginBottom: 8,
                   }}
                 >
@@ -1855,8 +2234,8 @@ export default function ExportPage() {
                     style={{
                       fontSize: 12,
                       padding: '6px 8px',
-                      background: 'rgba(255, 255, 255, 0.02)',
-                      border: '1px solid rgba(255, 255, 255, 0.05)',
+                      background: 'var(--card)',
+                      border: '1px solid var(--border)',
                       borderRadius: 4,
                       marginBottom: 6,
                     }}
@@ -1868,7 +2247,7 @@ export default function ExportPage() {
                   <div
                     style={{
                       fontSize: 11,
-                      color: 'rgba(255, 255, 255, 0.6)',
+                      color: 'var(--text-secondary)',
                       textAlign: 'center',
                       marginTop: 8,
                     }}
@@ -1883,32 +2262,32 @@ export default function ExportPage() {
                 <div
                   style={{
                     fontSize: 12,
-                    color: 'rgba(255, 255, 255, 0.7)',
+                    color: 'var(--text-secondary)',
                     marginBottom: 8,
                   }}
                 >
                   章节已附照片
                 </div>
                 {sectionPhotos.length === 0 && (
-                  <p style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.7)' }}>暂无照片附件</p>
+                  <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>暂无照片附件</p>
                 )}
                 {sectionPhotos.map((sec, idx) => (
                   <div
                     key={idx}
                     style={{
                       padding: '8px 10px',
-                      background: 'rgba(255, 255, 255, 0.02)',
-                      border: '1px solid rgba(255, 255, 255, 0.05)',
+                      background: 'var(--card)',
+                      border: '1px solid var(--border)',
                       borderRadius: 6,
                       marginBottom: 8,
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                       <div style={{ fontSize: 12, fontWeight: 600 }}>{idx + 1}. {sec.title}</div>
-                      <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.6)' }}>{sec.count} 张</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{sec.count} 张</div>
                     </div>
                     {sec.count === 0 ? (
-                      <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.6)' }}>尚未附加照片</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>尚未附加照片</div>
                     ) : (
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                         {sec.thumbs.slice(0, 4).map((src, i) => (
@@ -1921,7 +2300,7 @@ export default function ExportPage() {
                               backgroundImage: `url(${src})`,
                               backgroundSize: 'cover',
                               backgroundPosition: 'center',
-                              border: '1px solid rgba(255, 255, 255, 0.1)',
+                              border: '1px solid var(--border)',
                               boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
                             }}
                           />
@@ -1929,12 +2308,12 @@ export default function ExportPage() {
                         {sec.count > 4 && (
                           <div
                             style={{
-                              padding: '6px 10px',
-                              fontSize: 11,
-                              color: 'rgba(255, 255, 255, 0.7)',
-                              border: '1px dashed rgba(255, 255, 255, 0.25)',
-                              borderRadius: 6,
-                            }}
+                            padding: '6px 10px',
+                            fontSize: 11,
+                            color: 'var(--text-secondary)',
+                            border: '1px dashed rgba(31, 31, 31, 0.12)',
+                            borderRadius: 6,
+                          }}
                           >
                             +{sec.count - 4}
                           </div>
@@ -1946,12 +2325,103 @@ export default function ExportPage() {
               </div>
             </div>
           ) : (
-            <p style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.7)' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
               请先选择大纲版本
             </p>
           )}
         </div>
       </div>
+
+      {/* Edit Biography Lock Modal */}
+      {showLockModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.8)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1001,
+          }}
+          onClick={() => setShowLockModal(false)}
+        >
+          <div
+            style={{
+              background: 'linear-gradient(135deg, #1a1f2e 0%, #0b1220 100%)',
+              border: '2px solid rgba(139, 115, 85, 0.4)',
+              borderRadius: 16,
+              padding: 32,
+              maxWidth: 400,
+              textAlign: 'center',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+            <h3 style={{
+              margin: '0 0 12px',
+              fontSize: 20,
+              fontWeight: 700,
+              color: 'var(--text-primary)',
+            }}>
+              编辑传记内容 尚未解锁
+            </h3>
+            <p style={{
+              margin: '0 0 24px',
+              fontSize: 14,
+              color: 'var(--text-secondary)',
+              lineHeight: 1.6,
+            }}>
+              完成 <strong style={{ color: '#8B7355' }}>{EDIT_BIO_UNLOCK_THRESHOLD}</strong> 道问题后即可解锁该功能
+            </p>
+            <div style={{
+              background: 'rgba(139, 115, 85, 0.1)',
+              borderRadius: 8,
+              padding: 12,
+              marginBottom: 24,
+            }}>
+              <div style={{ fontSize: 12, color: '#8B7355', marginBottom: 4 }}>当前进度</div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: '#fff' }}>
+                {answeredCount} / {EDIT_BIO_UNLOCK_THRESHOLD}
+              </div>
+              <div style={{
+                height: 6,
+                background: 'rgba(139, 115, 85, 0.2)',
+                borderRadius: 3,
+                marginTop: 8,
+                overflow: 'hidden',
+              }}>
+                <div style={{
+                  height: '100%',
+                  width: `${Math.min(100, (answeredCount / EDIT_BIO_UNLOCK_THRESHOLD) * 100)}%`,
+                  background: 'linear-gradient(90deg, #8B7355, #A89070)',
+                  borderRadius: 3,
+                  transition: 'width 0.3s ease',
+                }} />
+              </div>
+            </div>
+            <button
+              onClick={() => setShowLockModal(false)}
+              style={{
+                padding: '12px 32px',
+                fontSize: 14,
+                fontWeight: 600,
+                background: 'linear-gradient(135deg, #8B7355 0%, #A89070 100%)',
+                color: 'white',
+                border: 'none',
+                borderRadius: 8,
+                cursor: 'pointer',
+              }}
+            >
+              继续答题
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Biography Editor Modal */}
       {showEditor && expandedChapters && (
@@ -1980,11 +2450,11 @@ export default function ExportPage() {
           onClick={() => setShowPreview(false)}
         >
           {/* Header */}
-          <div
+            <div
             style={{
               padding: '16px 24px',
               background: '#0a1628',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+              borderBottom: '1px solid rgba(31, 31, 31, 0.12)',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
@@ -1992,10 +2462,10 @@ export default function ExportPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <div>
-              <h2 style={{ margin: 0, fontSize: 18, color: '#fff' }}>
+              <h2 style={{ margin: 0, fontSize: 18, color: 'var(--text-primary)' }}>
                 📖 打印预览 - {templateConfig[template].icon} {templateConfig[template].name}
               </h2>
-              <p style={{ margin: '4px 0 0', fontSize: 12, color: 'rgba(255, 255, 255, 0.6)' }}>
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>
                 版本 {selectedVersion} · {selectedOutline.outline_json?.sections?.length || 0} 章节
               </p>
             </div>
@@ -2003,10 +2473,10 @@ export default function ExportPage() {
               onClick={() => setShowPreview(false)}
               style={{
                 padding: '8px 16px',
-                background: 'rgba(255, 255, 255, 0.1)',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
+                background: 'rgba(31, 31, 31, 0.06)',
+                border: '1px solid rgba(31, 31, 31, 0.12)',
                 borderRadius: 6,
-                color: '#fff',
+                color: 'var(--text-primary)',
                 cursor: 'pointer',
                 fontSize: 14,
               }}
@@ -2179,7 +2649,7 @@ export default function ExportPage() {
                   {/* Info */}
                   <div style={{ marginBottom: 20 }}>
                     <h3 style={{ fontSize: 14, marginBottom: 12, color: '#a78bfa' }}>基本信息</h3>
-                    <div style={{ background: 'rgba(255, 255, 255, 0.03)', padding: 12, borderRadius: 6, fontSize: 12 }}>
+                    <div style={{ background: 'var(--card)', padding: 12, borderRadius: 6, fontSize: 12 }}>
                       <div style={{ marginBottom: 6 }}>📏 页面尺寸：{report.info.pageSize}</div>
                       <div style={{ marginBottom: 6 }}>📄 总页数：{report.info.totalPages} 页</div>
                       <div style={{ marginBottom: 6 }}>🎨 颜色模式：{report.info.colorMode}</div>
@@ -2240,7 +2710,7 @@ export default function ExportPage() {
                       border: '1px solid rgba(99, 102, 241, 0.3)',
                       borderRadius: 6,
                       fontSize: 11,
-                      color: 'rgba(255, 255, 255, 0.7)',
+                      color: 'var(--text-secondary)',
                       marginBottom: 20,
                     }}
                   >

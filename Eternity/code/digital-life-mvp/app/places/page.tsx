@@ -103,7 +103,7 @@ export default function PlacesPage() {
           <h2 className="text-2xl font-bold text-gray-800 mb-2">未找到项目</h2>
           <p className="text-gray-600 mb-6">请先创建或选择一个项目</p>
           <a
-            href="/"
+            href="/main"
             className="inline-block px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
           >
             返回首页

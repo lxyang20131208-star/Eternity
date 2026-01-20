@@ -206,7 +206,7 @@ export default function OutlineAnnotationPage() {
             <Link href="/export" className="cyber-btn cyber-btn-primary" style={{ borderRadius: 6, padding: '10px 16px', fontSize: 13, textDecoration: 'none' }}>
               导出电子书 →
             </Link>
-            <Link href="/" className="cyber-btn" style={{ borderRadius: 6, padding: '10px 16px', fontSize: 13, textDecoration: 'none' }}>
+            <Link href="/main" className="cyber-btn" style={{ borderRadius: 6, padding: '10px 16px', fontSize: 13, textDecoration: 'none' }}>
               ← 返回主页
             </Link>
           </div>

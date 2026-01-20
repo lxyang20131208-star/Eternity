@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,14 +13,19 @@ export async function POST(req: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '')
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      global: { headers: { Authorization: authHeader } }
+
+    // Use anon key with user token for auth verification
+    const authClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } }
     })
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
+    const { data: { user }, error: authError } = await authClient.auth.getUser(token)
     if (authError || !user) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
     }
+
+    // Use service role key for storage operations (admin access)
+    const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
     const { filename, contentType } = await req.json()
 

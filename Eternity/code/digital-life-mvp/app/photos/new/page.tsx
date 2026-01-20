@@ -34,11 +34,11 @@ const LOCAL_ROSTER_KEY = "photoFlow.peopleRoster"
 const LOCAL_PHOTOS_KEY = "photoFlow.photos"
 const LOCAL_SAVE_KEY = "photoFlow.lastSaved"
 
-const EXISTING_PEOPLE: Person[] = [
-  { id: "p1", name: "父亲", relation: "父亲" },
-  { id: "p2", name: "母亲", relation: "母亲" },
-  { id: "p3", name: "Alex", relation: "朋友" },
-]
+// Start with empty roster - users will create people with proper UUIDs
+const EXISTING_PEOPLE: Person[] = []
+
+// UUID validation helper
+const isValidUUID = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
 
 export default function NewPhotoFlow() {
   const [step, setStep] = useState<Step>(1)
@@ -75,7 +75,9 @@ export default function NewPhotoFlow() {
       if (raw) {
         const parsed = JSON.parse(raw) as Person[]
         if (Array.isArray(parsed)) {
-          setPeopleRoster(parsed)
+          // Filter out any people with invalid UUIDs (legacy data cleanup)
+          const validPeople = parsed.filter(p => isValidUUID(p.id))
+          setPeopleRoster(validPeople)
         }
       }
     } catch (e) {
@@ -455,7 +457,15 @@ export default function NewPhotoFlow() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={styles.stepper}>
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} style={{ ...styles.stepDot, opacity: step >= i ? 1 : 0.35, background: step === i ? "linear-gradient(135deg,#35f2ff,#7c3aed)" : "#1f2a3d" }}>
+              <div
+                key={i}
+                style={{
+                  ...styles.stepDot,
+                  opacity: step >= i ? 1 : 0.35,
+                  background: step === i ? "linear-gradient(135deg,#f5d9b8,#efe6dd)" : "#f1e9e0",
+                  color: step === i ? "#2C2C2C" : "#6B6B6B",
+                }}
+              >
                 {i}
               </div>
             ))}
@@ -791,8 +801,8 @@ function PersonEditor({ person, onApply, onSave, onDelete }: {
 const styles: Record<string, any> = {
   page: {
     minHeight: "100vh",
-    background: "radial-gradient(circle at 20% 20%, rgba(53,242,255,0.15), transparent 25%), radial-gradient(circle at 80% 0%, rgba(124,58,237,0.18), transparent 28%), #0b1220",
-    color: "#e5ecf5",
+    background: "#FDFCFA",
+    color: "#2C2C2C",
     padding: "32px 24px 48px",
     fontFamily: "'Microsoft YaHei', 'Segoe UI', system-ui, -apple-system, sans-serif",
   },
@@ -808,7 +818,7 @@ const styles: Record<string, any> = {
     fontSize: 12,
     letterSpacing: 2,
     textTransform: "uppercase",
-    color: "#67e8f9",
+    color: "#8B7355",
   },
   title: {
     margin: "6px 0",
@@ -817,7 +827,7 @@ const styles: Record<string, any> = {
   },
   subtitle: {
     margin: 0,
-    color: "#a5b4c5",
+    color: "#6B6B6B",
     maxWidth: 640,
     lineHeight: 1.5,
   },
@@ -832,13 +842,14 @@ const styles: Record<string, any> = {
     display: "grid",
     placeItems: "center",
     fontWeight: 800,
-    color: "#e5ecf5",
-    border: "1px solid rgba(255,255,255,0.1)",
+    color: "#2C2C2C",
+    border: "1px solid rgba(0,0,0,0.06)",
+    background: "#f1e9e0",
   },
   error: {
-    background: "rgba(255,68,102,0.12)",
-    border: "1px solid rgba(255,68,102,0.4)",
-    color: "#ff99b0",
+    background: "rgba(220,38,38,0.08)",
+    border: "1px solid rgba(220,38,38,0.15)",
+    color: "#8b1d1d",
     borderRadius: 10,
     padding: 12,
     marginBottom: 16,
@@ -859,12 +870,11 @@ const styles: Record<string, any> = {
     gap: 12,
   },
   card: {
-    background: "linear-gradient(145deg, rgba(17,24,39,0.85), rgba(27,40,61,0.9))",
-    border: "1px solid rgba(255,255,255,0.08)",
+    background: "#fff",
+    border: "1px solid #E8E4DE",
     borderRadius: 16,
     padding: 18,
-    boxShadow: "0 20px 50px rgba(0,0,0,0.35)",
-    backdropFilter: "blur(6px)",
+    boxShadow: "0 8px 18px rgba(11,12,15,0.06)",
   },
   cardHeader: {
     fontWeight: 800,
@@ -873,16 +883,16 @@ const styles: Record<string, any> = {
   },
   cardHint: {
     margin: "0 0 10px",
-    color: "#93adc6",
+    color: "#6B6B6B",
     fontSize: 13,
   },
   dropzone: {
-    border: "1px dashed rgba(255,255,255,0.25)",
+    border: "1px dashed #E8E4DE",
     borderRadius: 14,
     padding: "30px 16px",
     textAlign: "center",
-    color: "#d9e3ee",
-    background: "rgba(255,255,255,0.02)",
+    color: "#2C2C2C",
+    background: "#FAF8F5",
     cursor: "pointer",
     transition: "all 0.2s",
   },
@@ -891,12 +901,12 @@ const styles: Record<string, any> = {
     height: 46,
     borderRadius: 14,
     margin: "0 auto 8px",
-    background: "linear-gradient(135deg,#35f2ff,#7c3aed)",
+    background: "linear-gradient(135deg,#f5d9b8,#efe6dd)",
     display: "grid",
     placeItems: "center",
     fontWeight: 800,
-    color: "#0b1220",
-    boxShadow: "0 10px 30px rgba(124,58,237,0.25)",
+    color: "#2C2C2C",
+    boxShadow: "0 8px 20px rgba(139,115,85,0.08)",
   },
   chipRow: {
     display: "flex",
@@ -907,21 +917,21 @@ const styles: Record<string, any> = {
   chip: {
     padding: "8px 12px",
     borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.12)",
-    background: "rgba(255,255,255,0.04)",
-    color: "#e5ecf5",
+    border: "1px solid #EEE",
+    background: "#fff",
+    color: "#2C2C2C",
     cursor: "pointer",
     fontSize: 12,
   },
   chipActive: {
     padding: "8px 12px",
     borderRadius: 999,
-    border: "1px solid rgba(53,242,255,0.6)",
-    background: "linear-gradient(135deg, rgba(53,242,255,0.15), rgba(124,58,237,0.15))",
-    color: "#e5ecf5",
+    border: "1px solid rgba(139,115,85,0.18)",
+    background: "linear-gradient(135deg, rgba(245,217,184,0.6), rgba(239,230,221,0.6))",
+    color: "#2C2C2C",
     cursor: "pointer",
     fontSize: 12,
-    boxShadow: "0 10px 30px rgba(53,242,255,0.2)",
+    boxShadow: "0 8px 20px rgba(139,115,85,0.06)",
   },
   chipGhost: {
     padding: "8px 12px",
@@ -936,7 +946,7 @@ const styles: Record<string, any> = {
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
-    color: "#7dd3fc",
+    color: "#8B7355",
     marginBottom: 6,
   },
   fieldGrid: {
@@ -952,21 +962,21 @@ const styles: Record<string, any> = {
   },
   input: {
     width: "100%",
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.08)",
+    background: "#fff",
+    border: "1px solid #E8E4DE",
     borderRadius: 10,
     padding: "10px 12px",
-    color: "#e5ecf5",
+    color: "#2C2C2C",
     fontSize: 13,
     outline: "none",
   },
   previewShell: {
-    background: "linear-gradient(145deg, rgba(12,18,28,0.9), rgba(17,28,46,0.95))",
-    border: "1px solid rgba(53,242,255,0.15)",
+    background: "#fff",
+    border: "1px solid #E8E4DE",
     borderRadius: 20,
     padding: 16,
     minHeight: 460,
-    boxShadow: "0 30px 60px rgba(0,0,0,0.45)",
+    boxShadow: "0 10px 30px rgba(11,12,15,0.06)",
   },
   previewImageWrap: {
     position: "relative",
@@ -974,7 +984,7 @@ const styles: Record<string, any> = {
     height: 360,
     overflow: "hidden",
     borderRadius: 18,
-    background: "radial-gradient(circle at 20% 20%, rgba(53,242,255,0.08), transparent 30%), #0d1624",
+    background: "#FAF8F5",
     padding: 6,
     boxSizing: "border-box",
   },
@@ -984,8 +994,8 @@ const styles: Record<string, any> = {
     height: "100%",
     borderRadius: 14,
     overflow: "hidden",
-    background: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.35))",
-    border: "1px solid rgba(255,255,255,0.06)",
+    background: "#fff",
+    border: "1px solid #EEE",
   },
   previewBadge: {
     position: "absolute",
@@ -993,12 +1003,12 @@ const styles: Record<string, any> = {
     left: 12,
     padding: "6px 10px",
     borderRadius: 12,
-    background: "rgba(11, 18, 32, 0.85)",
-    border: "1px solid rgba(53,242,255,0.35)",
-    color: "#67e8f9",
+    background: "#fff",
+    border: "1px solid #E8E4DE",
+    color: "#8B7355",
     fontSize: 12,
     letterSpacing: 1,
-    boxShadow: "0 8px 20px rgba(0,0,0,0.35)",
+    boxShadow: "0 8px 20px rgba(11,12,15,0.06)",
   },
   previewInfoBar: {
     position: "absolute",
@@ -1006,13 +1016,13 @@ const styles: Record<string, any> = {
     right: 0,
     bottom: 0,
     padding: "10px 14px",
-    background: "linear-gradient(180deg, transparent 0%, rgba(6,12,20,0.8) 55%, rgba(6,12,20,0.95) 100%)",
-    color: "#dce7f3",
+    background: "rgba(255,255,255,0.95)",
+    color: "#2C2C2C",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
     gap: 12,
-    borderTop: "1px solid rgba(255,255,255,0.05)",
+    borderTop: "1px solid #EEE",
   },
   thumbnailRow: {
     display: "flex",
@@ -1033,9 +1043,9 @@ const styles: Record<string, any> = {
   footerBar: {
     marginTop: 12,
     padding: "14px 16px",
-    background: "rgba(255,255,255,0.02)",
+    background: "#fff",
     borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.06)",
+    border: "1px solid #E8E4DE",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
@@ -1043,21 +1053,21 @@ const styles: Record<string, any> = {
   ghostBtn: {
     padding: "12px 16px",
     borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.15)",
-    background: "rgba(255,255,255,0.02)",
-    color: "#cdd6e0",
+    border: "1px solid #E8E4DE",
+    background: "transparent",
+    color: "#2C2C2C",
     cursor: "pointer",
   },
   primaryBtn: {
     padding: "12px 18px",
     borderRadius: 10,
-    background: "linear-gradient(135deg, #35f2ff, #7c3aed)",
-    color: "#0b1220",
+    background: "linear-gradient(135deg, #f5d9b8, #efe6dd)",
+    color: "#2C2C2C",
     fontWeight: 800,
     letterSpacing: 0.5,
     border: "none",
     cursor: "pointer",
-    boxShadow: "0 15px 35px rgba(124,58,237,0.35)",
+    boxShadow: "0 10px 30px rgba(139,115,85,0.08)",
   },
   linkBtn: {
     background: "none",
@@ -1069,8 +1079,8 @@ const styles: Record<string, any> = {
   personManager: {
     padding: 12,
     borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(255,255,255,0.02)",
+    border: "1px solid #E8E4DE",
+    background: "#fff",
   },
   personRow: {
     display: "flex",
@@ -1085,41 +1095,41 @@ const styles: Record<string, any> = {
   smallBtn: {
     padding: "8px 10px",
     borderRadius: 8,
-    border: "1px solid rgba(103,232,249,0.5)",
-    background: "linear-gradient(135deg, rgba(103,232,249,0.12), rgba(103,232,249,0.05))",
-    color: "#e5ecf5",
+    border: "1px solid rgba(139,115,85,0.12)",
+    background: "linear-gradient(135deg, rgba(139,115,85,0.08), rgba(139,115,85,0.04))",
+    color: "#2C2C2C",
     fontSize: 12,
     cursor: "pointer",
   },
   dangerBtn: {
     padding: "8px 10px",
     borderRadius: 8,
-    border: "1px solid rgba(255,68,102,0.5)",
-    background: "rgba(255,68,102,0.08)",
-    color: "#ff99b0",
+    border: "1px solid rgba(255,68,102,0.3)",
+    background: "rgba(255,68,102,0.06)",
+    color: "#9b1f2b",
     fontSize: 12,
     cursor: "pointer",
   },
   reviewItem: {
-    border: "1px solid rgba(255,255,255,0.08)",
+    border: "1px solid #E8E4DE",
     borderRadius: 12,
     padding: 10,
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
-    background: "rgba(255,255,255,0.02)",
+    background: "#fff",
   },
   reviewThumb: {
     width: 60,
     height: 60,
     borderRadius: 10,
     overflow: "hidden",
-    border: "1px solid rgba(255,255,255,0.1)",
+    border: "1px solid #EEE",
   },
 }
 
 const cssHelpers = `
-  .glass-card { background: linear-gradient(145deg, rgba(17,24,39,0.85), rgba(27,40,61,0.9)); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; box-shadow: 0 20px 50px rgba(0,0,0,0.35); }
-  .glass-card input::placeholder, .glass-card textarea::placeholder { color: #6b7a90; }
+  .glass-card { background: #fff; border: 1px solid #E8E4DE; border-radius: 16px; box-shadow: 0 8px 18px rgba(11,12,15,0.06); }
+  .glass-card input::placeholder, .glass-card textarea::placeholder { color: #9aa0a6; }
 `

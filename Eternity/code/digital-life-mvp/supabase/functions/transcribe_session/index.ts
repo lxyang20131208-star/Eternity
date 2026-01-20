@@ -38,6 +38,8 @@ async function callGeminiTranscribe(params: {
 }): Promise<string> {
   const { apiKey, model, mimeType, audioBase64, languageHint } = params
 
+  console.log(`[callGeminiTranscribe] Starting transcription, model: ${model}, audioBase64 length: ${audioBase64.length}`)
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
 
   const prompt =
@@ -47,6 +49,7 @@ async function callGeminiTranscribe(params: {
     `- Do NOT add titles, bullet points, or explanations.\n` +
     `- Keep the original language of the speech (e.g., English stays English).\n` +
     `- For Chinese content: Always use Simplified Chinese (简体中文). Convert Traditional Chinese to Simplified Chinese.\n` +
+    `- IMPORTANT: Transcribe the ENTIRE audio from beginning to end. Do not skip any parts or truncate early.\n` +
     (languageHint ? `- Language hint: ${languageHint}\n` : "")
 
   const body = {
@@ -69,6 +72,8 @@ async function callGeminiTranscribe(params: {
 
   let lastErr = ""
   for (let attempt = 1; attempt <= 3; attempt++) {
+    console.log(`[callGeminiTranscribe] Attempt ${attempt}/3`)
+
     const resp = await fetch(url, {
       method: "POST",
       headers: {
@@ -81,11 +86,13 @@ async function callGeminiTranscribe(params: {
     if (resp.ok) {
       const json = await resp.json()
       const text = extractGeminiText(json)
+      console.log(`[callGeminiTranscribe] Success! Transcript length: ${text?.length || 0}`)
       if (!text) throw new Error("Gemini returned empty transcript")
       return text
     }
 
     lastErr = await resp.text()
+    console.error(`[callGeminiTranscribe] Attempt ${attempt} failed:`, resp.status, lastErr)
     if (resp.status === 429 || resp.status === 503) {
       await sleep(500 * attempt)
       continue
@@ -93,6 +100,7 @@ async function callGeminiTranscribe(params: {
     break
   }
 
+  console.error(`[callGeminiTranscribe] All attempts failed`)
   throw new Error(`Gemini transcription failed: ${lastErr}`)
 }
 
@@ -163,8 +171,13 @@ Deno.serve(async (req) => {
     if (!audioResp.ok) throw new Error("Failed to fetch audio via signed URL")
     const audioBlob = await audioResp.blob()
 
+    console.log(`[transcribe_session] Audio blob size: ${audioBlob.size} bytes, type: ${audioBlob.type}`)
+
     const mimeType = (sess.audio_mime as string) || audioBlob.type || "audio/webm"
-    const audioBase64 = abToBase64(await audioBlob.arrayBuffer())
+    const audioArrayBuffer = await audioBlob.arrayBuffer()
+    const audioBase64 = abToBase64(audioArrayBuffer)
+
+    console.log(`[transcribe_session] Audio base64 size: ${audioBase64.length} chars`)
 
     const transcript = await callGeminiTranscribe({
       apiKey: GEMINI_API_KEY,

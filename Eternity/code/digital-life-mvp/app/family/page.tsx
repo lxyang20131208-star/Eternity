@@ -1,578 +1,590 @@
 'use client'
 
-import Link from 'next/link'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { listProjectOutlines, type BiographyOutline } from '../../lib/biographyOutlineApi'
+import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../../lib/supabaseClient'
-import { getPeople } from '../../lib/knowledgeGraphApi'
-import type { PersonWithRelations } from '../../lib/types/knowledge-graph'
+import PersonCard from '../../components/PersonCard'
+import PeopleGraph from '../../components/PeopleGraph'
+import Link from 'next/link'
 
-const LOCAL_NETWORK_KEY = 'familyNetwork.data'
-const LOCAL_PHOTOS_KEY = 'photoFlow.photos'
-const LOCAL_OUTLINE_ATTACHMENTS_KEY = 'outlineAttachments'
-
-type PhotoItem = {
-  id: string
-  fileName: string
-  previewUrl: string
-  remoteUrl?: string
-  people: Array<{ id: string; name: string; relation?: string }>
-  scene: {
-    location?: string
-    date?: string
-    event?: string
-    tags: string[]
-    notes?: string
-  }
-}
-
-type AttachmentNote = {
-  outlineVersion: number
-  sectionIndex: number
-  photoId: string
-  note: string
-  addedAt: string
-}
-
-export type FamilyMember = {
+interface Person {
   id: string
   name: string
-  birthYear?: number
-  avatarUrl?: string
-  notes?: string
-  generation?: number
-  x?: number
-  y?: number
+  aliases?: string[]
+  relationship_to_user?: string
+  bio_snippet?: string
+  avatar_url?: string
+  importance_score?: number
+  confidence_score?: number
+  extraction_status?: string
+  photos?: Array<{
+    url: string
+    caption?: string
+    source: string
+    isPrimary?: boolean
+  }>
 }
 
-export type Relationship = {
+interface Relationship {
   id: string
-  from: string
-  to: string
-  type: 'parent' | 'spouse' | 'sibling' | 'custom'
-  label?: string
+  person_a_id: string
+  person_b_id: string
+  relationship_type: string
+  custom_label?: string
+  bidirectional: boolean
 }
 
-type FamilyNetwork = {
-  members: FamilyMember[]
-  relationships: Relationship[]
-}
-
-const DEMO_NETWORK: FamilyNetwork = {
-  members: [
-    { id: 'm1', name: '祖父', generation: 0, x: 400, y: 100 },
-    { id: 'm2', name: '祖母', generation: 0, x: 520, y: 100 },
-    { id: 'm3', name: '父亲', generation: 1, x: 300, y: 240 },
-    { id: 'm4', name: '母亲', generation: 1, x: 420, y: 240 },
-    { id: 'm5', name: '叔叔', generation: 1, x: 580, y: 240 },
-    { id: 'm6', name: '我', generation: 2, x: 360, y: 380 },
-  ],
-  relationships: [
-    { id: 'r1', from: 'm1', to: 'm3', type: 'parent' },
-    { id: 'r2', from: 'm1', to: 'm5', type: 'parent' },
-    { id: 'r3', from: 'm2', to: 'm3', type: 'parent' },
-    { id: 'r4', from: 'm2', to: 'm5', type: 'parent' },
-    { id: 'r5', from: 'm1', to: 'm2', type: 'spouse' },
-    { id: 'r6', from: 'm3', to: 'm4', type: 'spouse' },
-    { id: 'r7', from: 'm3', to: 'm6', type: 'parent' },
-    { id: 'r8', from: 'm4', to: 'm6', type: 'parent' },
-  ],
-}
-
-export default function FamilyNetworkPage() {
-  const [network, setNetwork] = useState<FamilyNetwork>(DEMO_NETWORK)
-  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
-  const [showAddMember, setShowAddMember] = useState(false)
-  const [showAddRelation, setShowAddRelation] = useState(false)
+export default function FamilyPage() {
+  const [projectId, setProjectId] = useState<string | null>(null)
+  const [people, setPeople] = useState<Person[]>([])
+  const [relationships, setRelationships] = useState<Relationship[]>([])
+  const [selectedPerson, setSelectedPerson] = useState<Person | null>(null)
+  const [isExtracting, setIsExtracting] = useState(false)
+  const [isRefreshingPhotos, setIsRefreshingPhotos] = useState(false)
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
-  const [photos, setPhotos] = useState<PhotoItem[]>([])
-  const [attachments, setAttachments] = useState<AttachmentNote[]>([])
-  const [outlines, setOutlines] = useState<BiographyOutline[]>([])
-  const [outlinesLoading, setOutlinesLoading] = useState(false)
-  const [outlineError, setOutlineError] = useState<string | null>(null)
-  const canvasRef = useRef<HTMLDivElement>(null)
-  const hasHydrated = useRef(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [showRelationshipModal, setShowRelationshipModal] = useState(false)
+  const [selectedNodesForRelation, setSelectedNodesForRelation] = useState<string[]>([])
 
-  const selectedMember = useMemo(
-    () => network.members.find((m) => m.id === selectedMemberId),
-    [network.members, selectedMemberId]
-  )
-
-  const relatedRelationships = useMemo(() => {
-    if (!selectedMemberId) return []
-    return network.relationships.filter((r) => r.from === selectedMemberId || r.to === selectedMemberId)
-  }, [network.relationships, selectedMemberId])
-
-  const taggedPhotos = useMemo(() => {
-    if (!selectedMember) return []
-    return photos.filter((photo) => photo.people.some((p) => p.name === selectedMember.name))
-  }, [photos, selectedMember])
-
-  const memberSections = useMemo(() => {
-    if (!selectedMember || outlines.length === 0 || attachments.length === 0) return []
-    const map = new Map<string, { version: number; title: string; bullets: string[]; noteSnippets: string[]; photoCount: number }>()
-    const memberName = selectedMember.name
-
-    attachments.forEach((att) => {
-      const photo = photos.find((p) => p.id === att.photoId)
-      if (!photo) return
-      const hasPerson = photo.people.some((p) => p.name === memberName)
-      if (!hasPerson) return
-      const outline = outlines.find((o) => o.version === att.outlineVersion && o.outline_json)
-      const section = outline?.outline_json?.sections?.[att.sectionIndex]
-      if (!outline || !section) return
-      const key = `${outline.version}-${att.sectionIndex}`
-      const existing = map.get(key) || {
-        version: outline.version,
-        title: section.title,
-        bullets: section.bullets,
-        noteSnippets: [],
-        photoCount: 0,
-      }
-      existing.photoCount += 1
-      if (att.note) existing.noteSnippets.push(att.note)
-      map.set(key, existing)
-    })
-
-    return Array.from(map.values()).sort((a, b) => b.photoCount - a.photoCount)
-  }, [attachments, outlines, photos, selectedMember])
-
-  function showToast(text: string, type: 'success' | 'error' = 'success') {
+  const showToast = useCallback((text: string, type: 'success' | 'error' = 'success') => {
     setToast({ text, type })
-    setTimeout(() => setToast(null), 2000)
-  }
-
-  useEffect(() => {
-    if (hasHydrated.current || typeof window === 'undefined') return
-    try {
-      const raw = window.localStorage.getItem(LOCAL_NETWORK_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw) as FamilyNetwork
-        if (parsed.members && parsed.relationships) {
-          setNetwork(parsed)
-        }
-      }
-      // Load photos for tagging integration
-      const photosRaw = window.localStorage.getItem(LOCAL_PHOTOS_KEY)
-      if (photosRaw) {
-        const parsedPhotos = JSON.parse(photosRaw) as PhotoItem[]
-        if (Array.isArray(parsedPhotos)) {
-          setPhotos(parsedPhotos.filter((p) => {
-            const preview = p.previewUrl || p.remoteUrl
-            return preview && !preview.startsWith('blob:')
-          }))
-        }
-      }
-        const attachRaw = window.localStorage.getItem(LOCAL_OUTLINE_ATTACHMENTS_KEY)
-        if (attachRaw) {
-          const parsed = JSON.parse(attachRaw) as AttachmentNote[]
-          if (Array.isArray(parsed)) {
-            setAttachments(parsed)
-          }
-        }
-    } catch (e) {
-      console.warn('Network restore failed', e)
-    } finally {
-      hasHydrated.current = true
-    }
+    setTimeout(() => setToast(null), 2500)
   }, [])
 
+  // 初始化：获取项目ID
   useEffect(() => {
-    if (!hasHydrated.current || typeof window === 'undefined') return
-    try {
-      window.localStorage.setItem(LOCAL_NETWORK_KEY, JSON.stringify(network))
-    } catch (e) {
-      console.warn('Network persist failed', e)
-    }
-  }, [network])
-
-  useEffect(() => {
-    let canceled = false
-    async function loadOutlines() {
-      setOutlinesLoading(true)
-      setOutlineError(null)
+    async function initProject() {
       try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user || canceled) return
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+        if (!user) {
+          showToast('请先登录', 'error')
+          return
+        }
 
-        const { data: list, error: selErr } = await supabase
+        let { data: projects, error: selectError } = await supabase
           .from('projects')
           .select('id')
           .eq('owner_id', user.id)
           .eq('name', 'My Vault')
           .limit(1)
 
-        if (selErr) throw selErr
-        let projectId = list?.[0]?.id as string | undefined
+        if (selectError) throw selectError
 
-        if (!projectId) {
-          const { data: created, error: insErr } = await supabase
+        let pid = projects?.[0]?.id
+
+        if (!pid) {
+          const { data: created, error: insertError } = await supabase
             .from('projects')
             .insert({ owner_id: user.id, name: 'My Vault' })
             .select('id')
-            .maybeSingle()
-          if (insErr) throw insErr
-          projectId = created?.id
+            .single()
+
+          if (insertError) throw insertError
+          pid = created.id
         }
 
-        if (!projectId || canceled) return
-        const data = await listProjectOutlines(projectId)
-        if (!canceled) {
-          setOutlines(data.filter((o) => o.status === 'done' && o.outline_json))
-        }
-      } catch (err: any) {
-        if (!canceled) setOutlineError(err?.message || '无法加载大纲')
-      } finally {
-        if (!canceled) setOutlinesLoading(false)
+        setProjectId(pid)
+      } catch (error: any) {
+        console.error('初始化项目失败:', error)
+        showToast('初始化项目失败', 'error')
       }
     }
 
-    loadOutlines()
-    return () => {
-      canceled = true
+    initProject()
+  }, [showToast])
+
+  // 加载人物和关系
+  useEffect(() => {
+    if (!projectId) return
+
+    async function loadData() {
+      setIsLoading(true)
+      try {
+        // 加载人物
+        const peopleRes = await fetch(`/api/people?projectId=${projectId}`)
+        const peopleData = await peopleRes.json()
+
+        if (peopleData.error) throw new Error(peopleData.error)
+
+        // 为每个人物加载照片
+        const peopleWithPhotos = await Promise.all(
+          (peopleData.people || []).map(async (person: Person) => {
+            try {
+              const photosRes = await fetch(
+                `/api/people/photos?personId=${person.id}&projectId=${projectId}`
+              )
+              const photosData = await photosRes.json()
+              return {
+                ...person,
+                photos: photosData.photos || [],
+              }
+            } catch (error) {
+              console.error(`加载人物 ${person.name} 的照片失败:`, error)
+              return person
+            }
+          })
+        )
+
+        setPeople(peopleWithPhotos)
+
+        // 加载关系
+        const relRes = await fetch(`/api/people/relationships?projectId=${projectId}`)
+        const relData = await relRes.json()
+
+        if (relData.error) throw new Error(relData.error)
+
+        setRelationships(relData.relationships || [])
+      } catch (error: any) {
+        console.error('加载数据失败:', error)
+        showToast('加载数据失败', 'error')
+      } finally {
+        setIsLoading(false)
+      }
     }
-  }, [])
 
-  function addMember(member: Omit<FamilyMember, 'id'>) {
-    const newMember: FamilyMember = {
-      ...member,
-      id: crypto.randomUUID(),
-      x: member.x ?? 400,
-      y: member.y ?? 300,
+    loadData()
+  }, [projectId, showToast])
+
+  // 触发人物抽取（同步执行）
+  const handleExtractPeople = async () => {
+    if (!projectId || isExtracting) return
+
+    setIsExtracting(true)
+
+    try {
+      console.log('[Family] Starting people extraction for project:', projectId)
+      showToast('正在抽取人物，请稍候...', 'success')
+
+      const res = await fetch('/api/people/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId }),
+      })
+
+      console.log('[Family] API response status:', res.status)
+
+      const data = await res.json()
+      console.log('[Family] API response data:', data)
+
+      if (!data.success) {
+        throw new Error(data.error || 'Extraction failed')
+      }
+
+      // 检查结果
+      const newPeople = data.newPeople || 0
+      const updatedPeople = data.updatedPeople || 0
+
+      if (data.message) {
+        // 没有大纲或大纲为空
+        showToast(data.message, 'error')
+      } else if (newPeople === 0 && updatedPeople === 0) {
+        showToast('没有找到新人物', 'error')
+      } else {
+        showToast(`抽取完成！新增 ${newPeople} 人，更新 ${updatedPeople} 人`, 'success')
+        // 延迟刷新页面
+        setTimeout(() => window.location.reload(), 1500)
+      }
+    } catch (error: any) {
+      console.error('[Family] 人物抽取失败:', error)
+      showToast('人物抽取失败: ' + error.message, 'error')
+    } finally {
+      setIsExtracting(false)
     }
-    setNetwork((prev) => ({ ...prev, members: [...prev.members, newMember] }))
-    showToast(`已添加成员：${newMember.name}`)
-    setShowAddMember(false)
   }
 
-  function updateMember(id: string, updates: Partial<FamilyMember>) {
-    setNetwork((prev) => ({
-      ...prev,
-      members: prev.members.map((m) => (m.id === id ? { ...m, ...updates } : m)),
-    }))
-  }
+  // 刷新照片关联
+  const handleRefreshPhotos = async () => {
+    if (!projectId) return
 
-  function deleteMember(id: string) {
-    setNetwork((prev) => ({
-      members: prev.members.filter((m) => m.id !== id),
-      relationships: prev.relationships.filter((r) => r.from !== id && r.to !== id),
-    }))
-    showToast('已删除成员')
-    setSelectedMemberId(null)
-  }
+    setIsRefreshingPhotos(true)
 
-  function addRelationship(from: string, to: string, type: Relationship['type'], label?: string) {
-    const rel: Relationship = { id: crypto.randomUUID(), from, to, type, label }
-    setNetwork((prev) => ({ ...prev, relationships: [...prev.relationships, rel] }))
-    showToast('关系已添加')
-    setShowAddRelation(false)
-  }
+    try {
+      // 重新加载所有人物的照片
+      const updatedPeople = await Promise.all(
+        people.map(async (person) => {
+          const photosRes = await fetch(
+            `/api/people/photos?personId=${person.id}&projectId=${projectId}`
+          )
+          const photosData = await photosRes.json()
+          return {
+            ...person,
+            photos: photosData.photos || [],
+          }
+        })
+      )
 
-  function deleteRelationship(id: string) {
-    setNetwork((prev) => ({
-      ...prev,
-      relationships: prev.relationships.filter((r) => r.id !== id),
-    }))
-    showToast('关系已删除')
-  }
-
-  function clearNetwork() {
-    if (!confirm('确认清空整个家族网络？')) return
-    setNetwork({ members: [], relationships: [] })
-    setSelectedMemberId(null)
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(LOCAL_NETWORK_KEY)
+      setPeople(updatedPeople)
+      showToast('照片关联已刷新', 'success')
+    } catch (error: any) {
+      console.error('刷新照片失败:', error)
+      showToast('刷新照片失败', 'error')
+    } finally {
+      setIsRefreshingPhotos(false)
     }
-    showToast('网络已清空')
   }
 
-  function getRelationshipLabel(rel: Relationship): string {
-    if (rel.label) return rel.label
-    switch (rel.type) {
-      case 'parent':
-        return '父母'
-      case 'spouse':
-        return '配偶'
-      case 'sibling':
-        return '兄弟姐妹'
-      default:
-        return '自定义'
+  // 更新人物信息
+  const handleUpdatePerson = async (personId: string, updates: Partial<Person>) => {
+    try {
+      // 检查是否修改了名字
+      const person = people.find((p) => p.id === personId)
+      const isNameChanged = updates.name && person && updates.name !== person.name
+
+      const res = await fetch('/api/people', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          personId,
+          updates,
+          applyGlobalNameCorrection: isNameChanged,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (data.error) throw new Error(data.error)
+
+      // 更新本地状态
+      setPeople((prev) =>
+        prev.map((p) => (p.id === personId ? { ...p, ...updates } : p))
+      )
+
+      showToast('人物信息已更新', 'success')
+
+      if (isNameChanged) {
+        showToast(
+          `姓名已修改：${person.name} → ${updates.name}。请前往 Export 页面进行全局替换。`,
+          'success'
+        )
+      }
+    } catch (error: any) {
+      console.error('更新人物失败:', error)
+      showToast('更新失败: ' + error.message, 'error')
     }
+  }
+
+  // 删除人物
+  const handleDeletePerson = async (personId: string) => {
+    try {
+      const res = await fetch(`/api/people?personId=${personId}`, {
+        method: 'DELETE',
+      })
+
+      const data = await res.json()
+
+      if (data.error) throw new Error(data.error)
+
+      setPeople((prev) => prev.filter((p) => p.id !== personId))
+      setSelectedPerson(null)
+      showToast('人物已删除', 'success')
+    } catch (error: any) {
+      console.error('删除人物失败:', error)
+      showToast('删除失败: ' + error.message, 'error')
+    }
+  }
+
+  // 添加关系
+  const handleAddRelationship = async (personAId: string, personBId: string) => {
+    setSelectedNodesForRelation([personAId, personBId])
+    setShowRelationshipModal(true)
+  }
+
+  const handleCreateRelationship = async (
+    relationshipType: string,
+    customLabel?: string
+  ) => {
+    if (!projectId || selectedNodesForRelation.length !== 2) return
+
+    try {
+      const res = await fetch('/api/people/relationships', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          personAId: selectedNodesForRelation[0],
+          personBId: selectedNodesForRelation[1],
+          relationshipType,
+          customLabel,
+          bidirectional: true,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (data.error) throw new Error(data.error)
+
+      setRelationships((prev) => [...prev, data.relationship])
+      showToast('关系已创建', 'success')
+      setShowRelationshipModal(false)
+      setSelectedNodesForRelation([])
+    } catch (error: any) {
+      console.error('创建关系失败:', error)
+      showToast('创建失败: ' + error.message, 'error')
+    }
+  }
+
+  const stats = {
+    total: people.length,
+    confirmed: people.filter((p) => p.extraction_status === 'confirmed').length,
+    pending: people.filter((p) => p.extraction_status === 'pending').length,
+    totalPhotos: people.reduce((sum, p) => sum + (p.photos?.length || 0), 0),
+    totalRelationships: relationships.length,
   }
 
   return (
-    <main className="detroit-bg" style={{ minHeight: '100vh', padding: '48px 24px' }}>
-      <div style={{ maxWidth: 1400, margin: '0 auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 18 }}>
-          <div>
-            <div className="story-pill" style={{ marginBottom: 8 }}>FAMILY NETWORK</div>
-            <h1 style={{ margin: 0, fontSize: 32, letterSpacing: '1px' }}>动态家族关系网</h1>
-            <p style={{ margin: '6px 0 0', color: 'var(--text-secondary)' }}>管理成员、定义关系、与照片库联动查询。</p>
-          </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button className="cyber-btn cyber-btn-primary" style={{ borderRadius: 6, padding: '10px 16px', fontSize: 13 }} onClick={() => setShowAddMember(true)}>
-              + 添加成员
-            </button>
-            <button className="cyber-btn" style={{ borderRadius: 6, padding: '10px 16px', fontSize: 13 }} onClick={() => setShowAddRelation(true)}>
-              + 添加关系
-            </button>
-            <button className="cyber-btn cyber-btn-danger" style={{ borderRadius: 6, padding: '10px 16px', fontSize: 13 }} onClick={clearNetwork}>
-              清空网络
-            </button>
-            <Link href="/" className="cyber-btn" style={{ borderRadius: 6, padding: '10px 16px', fontSize: 13, textDecoration: 'none' }}>
-              ← 返回主页
-            </Link>
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16 }}>
-          <div className="glass-card" style={{ padding: 24, minHeight: 600, position: 'relative', overflow: 'hidden' }}>
-            <div ref={canvasRef} style={{ position: 'relative', width: '100%', height: 560 }}>
-              <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-                {network.relationships.map((rel) => {
-                  const from = network.members.find((m) => m.id === rel.from)
-                  const to = network.members.find((m) => m.id === rel.to)
-                  if (!from || !to) return null
-                  const x1 = from.x ?? 0
-                  const y1 = from.y ?? 0
-                  const x2 = to.x ?? 0
-                  const y2 = to.y ?? 0
-                  const color = rel.type === 'spouse' ? '#7c3aed' : rel.type === 'parent' ? '#00d4ff' : '#94a3b8'
-                  return (
-                    <line
-                      key={rel.id}
-                      x1={x1 + 30}
-                      y1={y1 + 30}
-                      x2={x2 + 30}
-                      y2={y2 + 30}
-                      stroke={color}
-                      strokeWidth={2}
-                      strokeDasharray={rel.type === 'custom' ? '5,5' : undefined}
-                      opacity={0.6}
-                    />
-                  )
-                })}
-              </svg>
-              {network.members.map((member) => (
-                <div
-                  key={member.id}
-                  draggable
-                  onDragEnd={(e) => {
-                    const rect = canvasRef.current?.getBoundingClientRect()
-                    if (!rect) return
-                    const x = e.clientX - rect.left - 30
-                    const y = e.clientY - rect.top - 30
-                    updateMember(member.id, { x: Math.max(0, Math.min(rect.width - 60, x)), y: Math.max(0, Math.min(rect.height - 60, y)) })
-                  }}
-                  onClick={() => setSelectedMemberId(member.id)}
-                  style={{
-                    position: 'absolute',
-                    left: member.x ?? 0,
-                    top: member.y ?? 0,
-                    width: 60,
-                    height: 60,
-                    borderRadius: 14,
-                    background: selectedMemberId === member.id ? 'linear-gradient(135deg, #35f2ff, #7c3aed)' : 'linear-gradient(135deg, rgba(53,242,255,0.2), rgba(124,58,237,0.2))',
-                    border: selectedMemberId === member.id ? '2px solid #35f2ff' : '1px solid rgba(255,255,255,0.2)',
-                    display: 'grid',
-                    placeItems: 'center',
-                    cursor: 'move',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: '#e5ecf5',
-                    textAlign: 'center',
-                    padding: 4,
-                    boxShadow: selectedMemberId === member.id ? '0 0 0 4px rgba(53,242,255,0.2)' : '0 4px 12px rgba(0,0,0,0.3)',
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  {member.name}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <aside style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div className="glass-card" style={{ padding: 16 }}>
-              <div style={{ fontWeight: 700, marginBottom: 8 }}>已选成员</div>
-              {selectedMember ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div>
-                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>姓名</div>
-                    <div style={{ fontWeight: 600 }}>{selectedMember.name}</div>
-                  </div>
-                  {selectedMember.birthYear && (
-                    <div>
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>出生年份</div>
-                      <div style={{ fontWeight: 600 }}>{selectedMember.birthYear}</div>
-                    </div>
-                  )}
-                  {selectedMember.generation !== undefined && (
-                    <div>
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>世代</div>
-                      <div style={{ fontWeight: 600 }}>第 {selectedMember.generation} 代</div>
-                    </div>
-                  )}
-                  {selectedMember.notes && (
-                    <div>
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>备注</div>
-                      <div style={{ fontSize: 13, lineHeight: 1.5 }}>{selectedMember.notes}</div>
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                    <button className="cyber-btn" style={{ flex: 1, borderRadius: 6, padding: '8px', fontSize: 12 }} onClick={() => alert('编辑功能即将推出')}>
-                      编辑
-                    </button>
-                    <button className="cyber-btn cyber-btn-danger" style={{ flex: 1, borderRadius: 6, padding: '8px', fontSize: 12 }} onClick={() => deleteMember(selectedMember.id)}>
-                      删除
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>点击画布中的节点查看详情</div>
-              )}
-            </div>
-
-            {selectedMember && relatedRelationships.length > 0 && (
-              <div className="glass-card" style={{ padding: 16 }}>
-                <div style={{ fontWeight: 700, marginBottom: 8 }}>关联关系</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {relatedRelationships.map((rel) => {
-                    const other = network.members.find((m) => m.id === (rel.from === selectedMemberId ? rel.to : rel.from))
-                    return (
-                      <div key={rel.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: 8, borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                        <div style={{ fontSize: 13 }}>
-                          <span style={{ color: '#67e8f9' }}>{other?.name || '未知'}</span>
-                          <span style={{ color: 'var(--text-secondary)', marginLeft: 6 }}>· {getRelationshipLabel(rel)}</span>
-                        </div>
-                        <button className="cyber-btn cyber-btn-danger" style={{ padding: '4px 8px', fontSize: 11, borderRadius: 6 }} onClick={() => deleteRelationship(rel.id)}>
-                          删除
-                        </button>
-                      </div>
-                    )
-                  })}
-                </div>
+    <main className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 p-6">
+      <div className="max-w-[1600px] mx-auto">
+        {/* Header */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
+            <div>
+              <div className="inline-block px-3 py-1 bg-purple-500/20 text-purple-700 dark:text-purple-300 rounded-full text-xs font-semibold mb-2">
+                FAMILY HOME
               </div>
-            )}
-
-            {selectedMember && taggedPhotos.length > 0 && (
-              <div className="glass-card" style={{ padding: 16 }}>
-                <div style={{ fontWeight: 700, marginBottom: 8 }}>关联照片 ({taggedPhotos.length})</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                  {taggedPhotos.map((photo) => {
-                    const src = photo.previewUrl || photo.remoteUrl
-                    return (
-                      <div
-                        key={photo.id}
-                        style={{
-                          aspectRatio: '1',
-                          borderRadius: 8,
-                          overflow: 'hidden',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          background: 'rgba(255,255,255,0.02)',
-                          cursor: 'pointer',
-                        }}
-                        title={photo.fileName}
-                      >
-                        {src ? (
-                          <img src={src} alt={photo.fileName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        ) : (
-                          <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', fontSize: 10, color: '#94a3b8' }}>无预览</div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-                <a href="/photos/new" className="cyber-btn" style={{ width: '100%', marginTop: 10, borderRadius: 6, padding: '8px', fontSize: 12, textDecoration: 'none', textAlign: 'center', display: 'block' }}>
-                  去标记更多照片
-                </a>
-              </div>
-            )}
-
-            {selectedMember && (
-              <div className="glass-card" style={{ padding: 16 }}>
-                <div style={{ fontWeight: 700, marginBottom: 8 }}>核心段落链接</div>
-                {outlinesLoading ? (
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>大纲加载中...</div>
-                ) : outlineError ? (
-                  <div style={{ fontSize: 12, color: '#ff9aa2' }}>{outlineError}</div>
-                ) : memberSections.length === 0 ? (
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>暂无与该成员相关的大纲段落。</div>
+              <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">
+                家庭人物空间
+              </h1>
+              <p className="text-gray-600 dark:text-gray-400">
+                从你的传记大纲中自动识别你提到过的人，帮你整理成家庭/人物关系网。
+              </p>
+            </div>
+            <div className="flex gap-3 flex-wrap">
+              <button
+                onClick={handleExtractPeople}
+                disabled={isExtracting}
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isExtracting ? (
+                  <>
+                    <svg
+                      className="animate-spin h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    <span>抽取中...</span>
+                  </>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {memberSections.map((section) => (
-                      <div
-                        key={`${section.version}-${section.title}`}
-                        style={{
-                          padding: 10,
-                          borderRadius: 10,
-                          border: '1px solid rgba(255,255,255,0.08)',
-                          background: 'rgba(255,255,255,0.02)',
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-                          <div>
-                            <div style={{ fontWeight: 600 }}>{section.title}</div>
-                            <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>版本 {section.version} · {section.photoCount} 张关联照片</div>
-                          </div>
-                          <a
-                            href="/outline-annotate"
-                            className="cyber-btn"
-                            style={{ padding: '6px 10px', fontSize: 11, borderRadius: 6, textDecoration: 'none' }}
-                          >
-                            前往大纲
-                          </a>
-                        </div>
-                        <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                          {section.bullets.slice(0, 2).map((b, idx) => (
-                            <li key={idx}>{b}</li>
-                          ))}
-                          {section.bullets.length > 2 && <li style={{ opacity: 0.7 }}>...更多</li>}
-                        </ul>
-                        {section.noteSnippets.length > 0 && (
-                          <div style={{ marginTop: 6, fontSize: 11, color: '#94a3b8' }}>
-                            {section.noteSnippets.slice(0, 2).map((note, idx) => (
-                              <div key={idx} style={{ marginBottom: 2 }}>“{note}”</div>
-                            ))}
-                            {section.noteSnippets.length > 2 && <div style={{ opacity: 0.7 }}>...更多备注</div>}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                  <>
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>重新抽取人物</span>
+                  </>
                 )}
-              </div>
-            )}
-
-            <div className="glass-card" style={{ padding: 16 }}>
-              <div style={{ fontWeight: 700, marginBottom: 8 }}>统计</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
-                <div>成员：{network.members.length} 人</div>
-                <div>关系：{network.relationships.length} 条</div>
-                <div>照片：{photos.length} 张</div>
-              </div>
+              </button>
+              <button
+                onClick={handleRefreshPhotos}
+                disabled={isRefreshingPhotos}
+                className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isRefreshingPhotos ? (
+                  <>
+                    <svg
+                      className="animate-spin h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    <span>刷新中...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                      />
+                    </svg>
+                    <span>刷新照片关联</span>
+                  </>
+                )}
+              </button>
+              <Link
+                href="/main"
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+              >
+                返回主页
+              </Link>
             </div>
-          </aside>
+          </div>
+
+          {/* Stats Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                {stats.total}
+              </div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">总人物</div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
+              <div className="text-2xl font-bold text-green-600">{stats.confirmed}</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">已确认</div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
+              <div className="text-2xl font-bold text-yellow-600">{stats.pending}</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">待确认</div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
+              <div className="text-2xl font-bold text-blue-600">
+                {stats.totalRelationships}
+              </div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">关系数</div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
+              <div className="text-2xl font-bold text-purple-600">{stats.totalPhotos}</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">关联照片</div>
+            </div>
+          </div>
+
         </div>
+
+        {/* Main Content */}
+        {isLoading ? (
+          <div className="flex items-center justify-center h-96">
+            <div className="text-center">
+              <svg
+                className="animate-spin h-12 w-12 mx-auto text-blue-500 mb-4"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                ></circle>
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+              <p className="text-gray-600 dark:text-gray-400">加载中...</p>
+            </div>
+          </div>
+        ) : people.length === 0 ? (
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-12 text-center">
+            <svg
+              className="w-24 h-24 mx-auto text-gray-400 mb-6"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+              />
+            </svg>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+              还没有人物
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              点击"重新抽取人物"按钮，系统将从你的传记大纲中自动识别人物
+            </p>
+            <p className="text-sm text-gray-500 dark:text-gray-500 mb-6">
+              💡 提示：请先前往主页回答问题并生成传记大纲，然后再回来抽取人物
+            </p>
+            <button
+              onClick={handleExtractPeople}
+              disabled={isExtracting}
+              className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isExtracting ? '抽取中...' : '开始抽取人物'}
+            </button>
+          </div>
+        ) : (
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6">
+            <PeopleGraph
+              people={people}
+              relationships={relationships}
+              onNodeClick={(person) => setSelectedPerson(person)}
+              onAddRelationship={handleAddRelationship}
+            />
+          </div>
+        )}
       </div>
 
-      {showAddMember && <AddMemberModal onClose={() => setShowAddMember(false)} onAdd={addMember} />}
-      {showAddRelation && <AddRelationModal network={network} onClose={() => setShowAddRelation(false)} onAdd={addRelationship} />}
+      {/* Person Detail Card */}
+      {selectedPerson && (
+        <PersonCard
+          person={selectedPerson}
+          onUpdate={handleUpdatePerson}
+          onDelete={handleDeletePerson}
+          onClose={() => setSelectedPerson(null)}
+        />
+      )}
 
+      {/* Relationship Modal */}
+      {showRelationshipModal && (
+        <RelationshipModal
+          personAId={selectedNodesForRelation[0]}
+          personBId={selectedNodesForRelation[1]}
+          people={people}
+          onClose={() => {
+            setShowRelationshipModal(false)
+            setSelectedNodesForRelation([])
+          }}
+          onCreate={handleCreateRelationship}
+        />
+      )}
+
+      {/* Toast Notification */}
       {toast && (
         <div
-          style={{
-            position: 'fixed',
-            right: 16,
-            bottom: 16,
-            padding: '12px 14px',
-            borderRadius: 12,
-            background: toast.type === 'success' ? 'rgba(53,242,255,0.12)' : 'rgba(255,68,102,0.12)',
-            border: toast.type === 'success' ? '1px solid rgba(53,242,255,0.4)' : '1px solid rgba(255,68,102,0.4)',
-            color: '#e5ecf5',
-            boxShadow: '0 12px 30px rgba(0,0,0,0.3)',
-            zIndex: 20,
-          }}
+          className={`fixed right-6 bottom-6 px-6 py-4 rounded-lg shadow-2xl z-50 ${
+            toast.type === 'success'
+              ? 'bg-green-500 text-white'
+              : 'bg-red-500 text-white'
+          }`}
         >
           {toast.text}
         </div>
@@ -581,113 +593,99 @@ export default function FamilyNetworkPage() {
   )
 }
 
-function AddMemberModal({ onClose, onAdd }: { onClose: () => void; onAdd: (member: Omit<FamilyMember, 'id'>) => void }) {
-  const [name, setName] = useState('')
-  const [birthYear, setBirthYear] = useState('')
-  const [generation, setGeneration] = useState('')
-  const [notes, setNotes] = useState('')
+// 关系创建模态框
+function RelationshipModal({
+  personAId,
+  personBId,
+  people,
+  onClose,
+  onCreate,
+}: {
+  personAId: string
+  personBId: string
+  people: Person[]
+  onClose: () => void
+  onCreate: (type: string, customLabel?: string) => void
+}) {
+  const [relationshipType, setRelationshipType] = useState('friend')
+  const [customLabel, setCustomLabel] = useState('')
+
+  const personA = people.find((p) => p.id === personAId)
+  const personB = people.find((p) => p.id === personBId)
+
+  const relationshipTypes = [
+    { value: 'parent', label: '父母/子女' },
+    { value: 'spouse', label: '配偶' },
+    { value: 'sibling', label: '兄弟姐妹' },
+    { value: 'friend', label: '朋友' },
+    { value: 'colleague', label: '同事' },
+    { value: 'custom', label: '自定义' },
+  ]
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }} onClick={onClose}>
-      <div className="glass-card" style={{ padding: 24, minWidth: 400, maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ margin: '0 0 16px', fontSize: 18 }}>添加成员</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <label>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>姓名 *</div>
-            <input className="cyber-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="如：祖父" />
-          </label>
-          <label>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>出生年份</div>
-            <input className="cyber-input" type="number" value={birthYear} onChange={(e) => setBirthYear(e.target.value)} placeholder="如：1950" />
-          </label>
-          <label>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>世代</div>
-            <input className="cyber-input" type="number" value={generation} onChange={(e) => setGeneration(e.target.value)} placeholder="如：0（最长辈）" />
-          </label>
-          <label>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>备注</div>
-            <textarea className="cyber-input" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="补充信息..." />
-          </label>
-          <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-            <button className="cyber-btn" style={{ flex: 1, borderRadius: 6, padding: '10px' }} onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+          创建关系
+        </h2>
+        <div className="mb-4">
+          <p className="text-gray-600 dark:text-gray-400 text-sm">
+            <span className="font-semibold text-blue-600">{personA?.name}</span>
+            {' 与 '}
+            <span className="font-semibold text-purple-600">{personB?.name}</span>
+            {' 的关系'}
+          </p>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              关系类型
+            </label>
+            <select
+              value={relationshipType}
+              onChange={(e) => setRelationshipType(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white"
+            >
+              {relationshipTypes.map((type) => (
+                <option key={type.value} value={type.value}>
+                  {type.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {relationshipType === 'custom' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                自定义描述
+              </label>
+              <input
+                type="text"
+                value={customLabel}
+                onChange={(e) => setCustomLabel(e.target.value)}
+                placeholder="例如：表兄弟、师生关系"
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white"
+              />
+            </div>
+          )}
+          <div className="flex gap-3 mt-6">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+            >
               取消
             </button>
             <button
-              className="cyber-btn cyber-btn-primary"
-              style={{ flex: 1, borderRadius: 6, padding: '10px' }}
-              disabled={!name.trim()}
-              onClick={() => {
-                onAdd({
-                  name: name.trim(),
-                  birthYear: birthYear ? parseInt(birthYear, 10) : undefined,
-                  generation: generation ? parseInt(generation, 10) : undefined,
-                  notes: notes.trim() || undefined,
-                })
-              }}
+              onClick={() => onCreate(relationshipType, customLabel || undefined)}
+              disabled={relationshipType === 'custom' && !customLabel.trim()}
+              className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              添加
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function AddRelationModal({ network, onClose, onAdd }: { network: FamilyNetwork; onClose: () => void; onAdd: (from: string, to: string, type: Relationship['type'], label?: string) => void }) {
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
-  const [type, setType] = useState<Relationship['type']>('parent')
-  const [label, setLabel] = useState('')
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }} onClick={onClose}>
-      <div className="glass-card" style={{ padding: 24, minWidth: 400, maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ margin: '0 0 16px', fontSize: 18 }}>添加关系</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <label>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>从</div>
-            <select className="cyber-input" value={from} onChange={(e) => setFrom(e.target.value)}>
-              <option value="">选择成员...</option>
-              {network.members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>到</div>
-            <select className="cyber-input" value={to} onChange={(e) => setTo(e.target.value)}>
-              <option value="">选择成员...</option>
-              {network.members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>关系类型</div>
-            <select className="cyber-input" value={type} onChange={(e) => setType(e.target.value as Relationship['type'])}>
-              <option value="parent">父母</option>
-              <option value="spouse">配偶</option>
-              <option value="sibling">兄弟姐妹</option>
-              <option value="custom">自定义</option>
-            </select>
-          </label>
-          {type === 'custom' && (
-            <label>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>自定义标签</div>
-              <input className="cyber-input" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="如：表兄弟、养父母" />
-            </label>
-          )}
-          <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-            <button className="cyber-btn" style={{ flex: 1, borderRadius: 6, padding: '10px' }} onClick={onClose}>
-              取消
-            </button>
-            <button className="cyber-btn cyber-btn-primary" style={{ flex: 1, borderRadius: 6, padding: '10px' }} disabled={!from || !to || from === to} onClick={() => onAdd(from, to, type, label.trim() || undefined)}>
-              添加
+              创建
             </button>
           </div>
         </div>

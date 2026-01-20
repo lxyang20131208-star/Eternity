@@ -277,7 +277,7 @@ export default function StoriesPage() {
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <Link
-                href="/"
+                href="/main"
                 className="cyber-btn"
                 style={{ borderRadius: 6, padding: '10px 16px', fontSize: 13, textDecoration: 'none' }}
               >

@@ -335,7 +335,7 @@ export function generatePrintCSS(config: PrintConfig, bookTitle: string): string
       right: ${pageSize.bleed + margins.inner}mm;
     }` : ''}
     
-    /* 正文段落 */
+    /* 正文段落 - 统一样式 */
     p {
       text-align: ${body.align};
       text-indent: ${body.indent};
@@ -343,39 +343,62 @@ export function generatePrintCSS(config: PrintConfig, bookTitle: string): string
       padding: 0;
       line-height: ${body.lineHeight};
       margin-bottom: ${body.paragraphSpacing}pt;
-      orphans: 2;
-      widows: 2;
+      /* 防止段落被截断 */
+      break-inside: avoid;
+      page-break-inside: avoid;
+      -webkit-column-break-inside: avoid;
+      orphans: 3;
+      widows: 3;
     }
-    
+
+    /* 章节内容区域 */
+    .chapter-content {
+      /* 确保内容区域正确分页 */
+    }
+
+    /* 所有段落（包括首段）使用统一的首行缩进 */
+    .chapter-content p {
+      text-indent: ${body.indent};
+    }
+
     /* 章节标题 */
     .chapter-title-page {
       padding-top: ${chapter.topSpacing}mm;
       text-align: center;
+      /* 标题区域不分页 */
+      break-inside: avoid;
+      page-break-inside: avoid;
+      break-after: avoid;
+      page-break-after: avoid;
     }
-    
+
     .chapter-number {
       font-size: ${chapter.numberFontSize}pt;
       color: #666;
       margin-bottom: 8pt;
       font-weight: normal;
     }
-    
+
     .chapter-title {
       font-size: ${chapter.titleFontSize}pt;
       font-weight: bold;
       margin-bottom: ${chapter.bottomSpacing}mm;
       line-height: 1.4;
     }
-    
-    /* 首字下沉 */
+
+    /* 首字下沉 - 仅影响首字母样式，不影响缩进 */
     ${chapter.dropCap ? `
-    .chapter-first-paragraph::first-letter {
+    .first-para::first-letter {
       float: left;
       font-size: ${body.fontSize * 2.5}pt;
       line-height: ${chapter.dropCapLines * body.lineHeight * body.fontSize}pt;
       font-weight: bold;
       margin-right: 0.1em;
       margin-top: 0.05em;
+    }
+    /* 首段仍保持统一缩进 */
+    .first-para {
+      text-indent: ${body.indent};
     }` : ''}
     
     /* 封面页 */

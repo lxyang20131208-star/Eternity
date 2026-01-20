@@ -27,7 +27,18 @@ export default function PhotoDetailPage() {
   const loadPhoto = async () => {
     setLoading(true);
     try {
+      const projectId = process.env.NEXT_PUBLIC_SUPABASE_PROJECT_ID || 'YOUR_PROJECT_ID';
+      if (!projectId || projectId === 'YOUR_PROJECT_ID') {
+        // Running in demo/dev without a real project — skip API call
+        console.info('Demo mode: skipping fetch for photo detail');
+        setLoading(false);
+        return;
+      }
       const data = await getPhoto(photoId);
+      if (!data) {
+        router.push('/photos');
+        return;
+      }
       setPhoto(data);
       setEditData({
         title: data.title || '',
@@ -35,7 +46,7 @@ export default function PhotoDetailPage() {
         tags: data.tags || [],
       });
     } catch (error) {
-      console.error('Failed to load photo:', error);
+      console.error('Failed to load photo:', (error as any)?.message ?? error);
       router.push('/photos');
     } finally {
       setLoading(false);
@@ -96,8 +107,8 @@ export default function PhotoDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white" />
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-800" />
       </div>
     );
   }
@@ -107,31 +118,31 @@ export default function PhotoDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white">
+    <div className="min-h-screen bg-white text-gray-900">
       {/* 顶部工具栏 */}
-      <header className="fixed top-0 left-0 right-0 z-20 bg-black/80 backdrop-blur-xl">
+      <header className="fixed top-0 left-0 right-0 z-20 bg-white/80 backdrop-blur-xl border-b border-gray-100">
         <div className="flex items-center justify-between px-4 py-3">
           <button
             onClick={() => router.back()}
-            className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
 
-          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
             {!photo.is_sorted && (
               <button
                 onClick={handleMarkAsSorted}
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium transition-colors"
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium transition-colors text-white"
               >
                 标记为已整理
               </button>
             )}
             <button
               onClick={() => setIsEditing(!isEditing)}
-              className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
@@ -144,7 +155,7 @@ export default function PhotoDetailPage() {
             </button>
             <button
               onClick={handleDelete}
-              className="p-2 hover:bg-white/10 rounded-lg transition-colors text-red-500"
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-red-600"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
@@ -170,7 +181,7 @@ export default function PhotoDetailPage() {
         </div>
 
         {/* 右侧：信息面板 */}
-        <aside className="w-96 bg-zinc-900 overflow-y-auto">
+        <aside className="w-96 bg-white border-l border-gray-100 overflow-y-auto">
           <div className="p-6 space-y-6">
             {/* 标题和描述 */}
             {isEditing ? (
@@ -181,7 +192,7 @@ export default function PhotoDetailPage() {
                     type="text"
                     value={editData.title}
                     onChange={(e) => setEditData({ ...editData, title: e.target.value })}
-                    className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="照片标题"
                   />
                 </div>
@@ -191,14 +202,14 @@ export default function PhotoDetailPage() {
                     value={editData.description}
                     onChange={(e) => setEditData({ ...editData, description: e.target.value })}
                     rows={4}
-                    className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                     placeholder="添加描述..."
                   />
                 </div>
                 <div className="flex gap-2">
                   <button
                     onClick={handleSave}
-                    className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition-colors"
+                    className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition-colors text-white"
                   >
                     保存
                   </button>
@@ -211,7 +222,7 @@ export default function PhotoDetailPage() {
                         tags: photo.tags || [],
                       });
                     }}
-                    className="flex-1 py-2 bg-zinc-700 hover:bg-zinc-600 rounded-lg font-medium transition-colors"
+                    className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors"
                   >
                     取消
                   </button>
@@ -223,53 +234,55 @@ export default function PhotoDetailPage() {
                   <h2 className="text-xl font-semibold mb-2">{photo.title}</h2>
                 )}
                 {photo.description && (
-                  <p className="text-gray-400 text-sm">{photo.description}</p>
+                  <p className="text-gray-600 text-sm">{photo.description}</p>
                 )}
               </div>
             )}
 
             {/* 拍摄信息 */}
             <div>
-              <h3 className="text-sm font-semibold mb-3 text-gray-400 uppercase">拍摄信息</h3>
+              <h3 className="text-sm font-semibold mb-3 text-gray-600 uppercase">拍摄信息</h3>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-400">拍摄时间</span>
+                  <span className="text-gray-500">拍摄时间</span>
                   <span>{formatDate(photo.taken_at)}</span>
                 </div>
                 {photo.place && (
                   <div className="flex justify-between">
-                    <span className="text-gray-400">地点</span>
+                    <span className="text-gray-500">地点</span>
                     <span>{photo.place.name}</span>
                   </div>
                 )}
                 {photo.event && (
                   <div className="flex justify-between">
-                    <span className="text-gray-400">事件</span>
+                    <span className="text-gray-500">事件</span>
                     <span>{photo.event.title}</span>
                   </div>
                 )}
                 <div className="flex justify-between">
-                  <span className="text-gray-400">尺寸</span>
+                  <span className="text-gray-500">尺寸</span>
                   <span>
                     {photo.width} × {photo.height}
                   </span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">文件大小</span>
-                  <span>{(photo.file_size / 1024 / 1024).toFixed(2)} MB</span>
-                </div>
+                {photo.file_size && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">文件大小</span>
+                    <span>{(photo.file_size / 1024 / 1024).toFixed(2)} MB</span>
+                  </div>
+                )}
               </div>
             </div>
 
             {/* 标签 */}
             {photo.tags && photo.tags.length > 0 && (
               <div>
-                <h3 className="text-sm font-semibold mb-3 text-gray-400 uppercase">标签</h3>
+                <h3 className="text-sm font-semibold mb-3 text-gray-600 uppercase">标签</h3>
                 <div className="flex flex-wrap gap-2">
                   {photo.tags.map((tag) => (
                     <span
                       key={tag}
-                      className="px-3 py-1 bg-zinc-800 rounded-full text-sm"
+                      className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700"
                     >
                       #{tag}
                     </span>
@@ -281,11 +294,11 @@ export default function PhotoDetailPage() {
             {/* 相关人物 */}
             {photo.people && photo.people.length > 0 && (
               <div>
-                <h3 className="text-sm font-semibold mb-3 text-gray-400 uppercase">相关人物</h3>
+                <h3 className="text-sm font-semibold mb-3 text-gray-600 uppercase">相关人物</h3>
                 <div className="space-y-2">
                   {photo.people.map((person) => (
                     <div key={person.id} className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-zinc-700 rounded-full" />
+                      <div className="w-10 h-10 bg-gray-100 rounded-full" />
                       <span className="text-sm">{person.name}</span>
                     </div>
                   ))}

@@ -242,5 +242,8 @@ export interface PhotoStats {
 export interface UnsortedStats {
   project_id: string;
   unsorted_count: number;
+  total_count: number;
+  without_person: number;
+  without_place: number;
   last_upload?: string;
 }
