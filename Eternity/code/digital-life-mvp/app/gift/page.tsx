@@ -11,7 +11,7 @@ export default function GiftPage() {
   const [wrap, setWrap] = useState(false)
   const [coupon, setCoupon] = useState('')
 
-  const basePrice = 198
+  const basePrice = 99.9
   const wrapPrice = wrap ? 10 : 0
   const total = basePrice + wrapPrice
 
@@ -64,7 +64,7 @@ export default function GiftPage() {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <input id="wrap" type="checkbox" checked={wrap} onChange={(e) => setWrap(e.target.checked)} />
-              <label htmlFor="wrap" style={{ color: '#444' }}>礼物包装 +¥10</label>
+              <label htmlFor="wrap" style={{ color: '#444' }}>礼物包装 +$10</label>
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
@@ -87,20 +87,20 @@ export default function GiftPage() {
         <aside style={{ background: '#fff', border: '1px solid #ECE6DB', borderRadius: 12, padding: 18, height: 'fit-content' }}>
           <h3 style={{ margin: 0, fontSize: 14, color: '#2C2C2C' }}>订单概要</h3>
           <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', color: '#6B6B6B' }}>
-            <div>数字遗书（完整版）</div>
-            <div>¥{basePrice}</div>
+            <div>Everarchive Pro</div>
+            <div>{`$${basePrice}`}</div>
           </div>
 
           <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', color: '#6B6B6B' }}>
             <div>礼物包装</div>
-            <div>{wrap ? `¥${wrapPrice}` : '—'}</div>
+            <div>{wrap ? `$${wrapPrice}` : '—'}</div>
           </div>
 
           <hr style={{ border: 'none', borderTop: '1px dashed #ECE6DB', margin: '14px 0' }} />
 
           <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 16 }}>
             <div>合计</div>
-            <div>¥{total}</div>
+            <div>{`$${total}`}</div>
           </div>
 
           <div style={{ marginTop: 12, fontSize: 12, color: '#8C8377' }}>付款后我们会按你的选择将传记发送给收件人。</div>

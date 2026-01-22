@@ -35,25 +35,25 @@ export function SlotFilledDisplay({
   return (
     <div
       className={`group flex items-start gap-2 py-2 px-3 rounded
-                 hover:bg-white/5 transition-colors
+                 hover:bg-slate-100 transition-colors
                  ${canClick ? 'cursor-pointer' : 'cursor-default'}`}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
       onClick={handleClick}
     >
       {/* 问题图标 */}
-      <span className={`mt-0.5 flex-shrink-0 ${canClick ? 'text-cyan-400' : 'text-cyan-400/50'}`}>
+      <span className={`mt-0.5 flex-shrink-0 ${canClick ? 'text-amber-600' : 'text-slate-400'}`}>
         {canClick ? '●' : '○'}
       </span>
 
       {/* 问题文本 */}
-      <span className={`flex-1 text-sm leading-relaxed ${canClick ? 'text-white/90 hover:text-cyan-300' : 'text-white/80'}`}>
+      <span className={`flex-1 text-sm leading-relaxed ${canClick ? 'text-slate-800 hover:text-amber-700' : 'text-slate-600'}`}>
         {text}
       </span>
 
       {/* 来源标识 */}
       <span
-        className="text-xs text-white/30 flex-shrink-0"
+        className="text-xs text-slate-400 flex-shrink-0"
         title={source === 'ai' ? 'AI 生成' : '自己写的'}
       >
         {source === 'ai' ? '✨' : '✎'}
@@ -88,8 +88,8 @@ export function SlotFilledDisplay({
             e.stopPropagation()
             onEdit()
           }}
-          className="px-2 py-0.5 text-xs text-white/40 hover:text-cyan-400
-                     hover:bg-cyan-500/10 rounded transition-colors"
+          className="px-2 py-0.5 text-xs text-slate-400 hover:text-amber-600
+                     hover:bg-amber-100 rounded transition-colors"
         >
           编辑
         </button>
@@ -98,8 +98,8 @@ export function SlotFilledDisplay({
             e.stopPropagation()
             onDelete()
           }}
-          className="px-2 py-0.5 text-xs text-white/40 hover:text-red-400
-                     hover:bg-red-500/10 rounded transition-colors"
+          className="px-2 py-0.5 text-xs text-slate-400 hover:text-red-600
+                     hover:bg-red-50 rounded transition-colors"
         >
           删除
         </button>

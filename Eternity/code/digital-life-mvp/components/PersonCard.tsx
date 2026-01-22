@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 
 interface Person {
@@ -26,6 +27,7 @@ interface PersonCardProps {
   onUpdate: (personId: string, updates: Partial<Person>) => Promise<void>
   onDelete: (personId: string) => Promise<void>
   onClose: () => void
+  onMerge?: (person: Person) => void
 }
 
 const RELATIONSHIP_PRESETS = [
@@ -57,7 +59,8 @@ const RELATIONSHIP_PRESETS = [
   '其他',
 ]
 
-export default function PersonCard({ person, onUpdate, onDelete, onClose }: PersonCardProps) {
+export default function PersonCard({ person, onUpdate, onDelete, onClose, onMerge }: PersonCardProps) {
+  const router = useRouter()
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [editedData, setEditedData] = useState({
@@ -205,12 +208,28 @@ export default function PersonCard({ person, onUpdate, onDelete, onClose }: Pers
           {/* Edit Mode Toggle */}
           <div className="flex justify-end gap-2">
             {!isEditing ? (
-              <button
-                onClick={() => setIsEditing(true)}
-                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-              >
-                编辑信息
-              </button>
+              <>
+                <button
+                  onClick={() => setIsEditing(true)}
+                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                >
+                  编辑信息
+                </button>
+                <button
+                  onClick={() => onMerge?.(person)}
+                  className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
+                  title="将此人物与其他重复人物合并"
+                >
+                  合并重复
+                </button>
+                <button
+                  onClick={handleDelete}
+                  className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                  title="删除此人物"
+                >
+                  删除
+                </button>
+              </>
             ) : (
               <>
                 <button
@@ -375,9 +394,20 @@ export default function PersonCard({ person, onUpdate, onDelete, onClose }: Pers
 
           {/* Photos */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              相关照片
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                相关照片
+              </label>
+              <button
+                onClick={() => router.push(`/photos/new?personId=${person.id}&personName=${encodeURIComponent(person.name)}`)}
+                className="px-3 py-1.5 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-1"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                上传照片
+              </button>
+            </div>
             {person.photos && person.photos.length > 0 ? (
               <div className="grid grid-cols-3 gap-2">
                 {person.photos.map((photo, idx) => (
@@ -402,7 +432,13 @@ export default function PersonCard({ person, onUpdate, onDelete, onClose }: Pers
                 ))}
               </div>
             ) : (
-              <p className="text-gray-500 dark:text-gray-400 text-sm">暂无关联照片</p>
+              <div className="text-center py-6 bg-gray-50 dark:bg-gray-800 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
+                <svg className="w-10 h-10 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <p className="text-gray-500 dark:text-gray-400 text-sm mb-2">暂无关联照片</p>
+                <p className="text-gray-400 dark:text-gray-500 text-xs">点击上方按钮上传与此人相关的照片</p>
+              </div>
             )}
           </div>
 

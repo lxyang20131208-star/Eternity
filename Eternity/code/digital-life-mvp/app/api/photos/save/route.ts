@@ -58,17 +58,32 @@ export async function POST(req: NextRequest) {
     // Process each photo
     const savedPhotos = []
     for (const photo of photos) {
-      // Insert/update photo
+      // Insert/update photo with 5-field annotation
       const photoData = {
         id: photo.id,
         user_id: user.id,
         file_name: photo.fileName,
         photo_url: photo.remoteUrl || photo.previewUrl,
+        // 5-field annotation system
+        linked_question_id: photo.linkedQuestionId || null,
+        time_taken: photo.timeTaken ? new Date(photo.timeTaken).toISOString() : null,
+        time_precision: photo.timePrecision || 'fuzzy',
+        place_id: photo.placeId || null,
+        caption: photo.caption || null,
+        // Legacy scene fields
         location: photo.scene?.location || null,
         event_date: photo.scene?.date || null,
         event_name: photo.scene?.event || null,
         tags: photo.scene?.tags || [],
-        notes: photo.scene?.notes || null
+        notes: photo.scene?.notes || null,
+        // Auto-calculate annotation status
+        annotation_status: (
+          photo.linkedQuestionId &&
+          photo.people?.length > 0 &&
+          photo.timeTaken &&
+          photo.placeId &&
+          photo.caption?.trim()
+        ) ? 'complete' : 'incomplete'
       }
 
       const { data: savedPhoto, error: photoError } = await supabase
@@ -192,6 +207,12 @@ export async function GET(req: NextRequest) {
         fileName: photo.file_name,
         previewUrl: photo.photo_url,
         remoteUrl: photo.photo_url,
+        // 5-field annotation
+        linkedQuestionId: photo.linked_question_id,
+        timeTaken: photo.time_taken ? photo.time_taken.split('T')[0] : null,
+        timePrecision: photo.time_precision || 'fuzzy',
+        placeId: photo.place_id,
+        caption: photo.caption,
         people,
         scene: {
           location: photo.location,

@@ -27,6 +27,11 @@ export default function BuyPage() {
     }
   }
 
+  async function handleSignOut() {
+    await supabase.auth.signOut()
+    router.push('/signin')
+  }
+
   async function handlePurchase(plan: 'plus' | 'pro') {
     if (!userId) return
 
@@ -115,21 +120,51 @@ export default function BuyPage() {
         maxWidth: 1000,
         margin: '0 auto',
       }}>
-        {/* 返回首页 */}
-        <Link
-          href="/"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            color: colors.textMuted,
-            fontSize: 14,
-            textDecoration: 'none',
-            marginBottom: 48,
-          }}
-        >
-          ← 返回首页
-        </Link>
+        {/* 顶部导航栏：返回首页 + 退出登录 */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 48,
+        }}>
+          <Link
+            href="/"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              color: colors.textMuted,
+              fontSize: 14,
+              textDecoration: 'none',
+            }}
+          >
+            ← 返回首页
+          </Link>
+
+          <button
+            onClick={handleSignOut}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: colors.textMuted,
+              fontSize: 14,
+              cursor: 'pointer',
+              padding: '8px 16px',
+              borderRadius: 6,
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#f5f5f5'
+              e.currentTarget.style.color = colors.text
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'none'
+              e.currentTarget.style.color = colors.textMuted
+            }}
+          >
+            退出登录
+          </button>
+        </div>
 
         {/* 页面标题 */}
         <div style={{

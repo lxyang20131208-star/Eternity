@@ -102,7 +102,7 @@ export default function BookProgressPage() {
       setLoading(true)
       try {
         const [qRes, aRes, oRes] = await Promise.all([
-          supabase.from('questions').select('id, text, chapter'),
+          supabase.from('questions').select('id, text, chapter').in('scope', ['global', 'user']),
           supabase.from('answer_sessions').select('id, created_at, question_id, transcript_text, status').eq('project_id', projectId).order('created_at', { ascending: false }),
           supabase.from('biography_outlines').select('id, version, status, created_at').eq('project_id', projectId).order('version', { ascending: false }),
         ])

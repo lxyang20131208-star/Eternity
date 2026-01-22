@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
           }
           return null;
         })
-        .filter((item): item is { title: string; description: string } =>
+        .filter((item: { title: string; description: string } | null): item is { title: string; description: string } =>
           item !== null && item.title.length >= 2 && item.title.length <= 20
         )
         .slice(0, 3);

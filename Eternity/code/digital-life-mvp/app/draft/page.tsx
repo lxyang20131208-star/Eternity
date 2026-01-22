@@ -619,7 +619,7 @@ export default function DraftPage() {
         width: '100%',
       }}>
         <Link
-          href="/main"
+          href="/"
           style={{
             display: 'flex',
             alignItems: 'center',

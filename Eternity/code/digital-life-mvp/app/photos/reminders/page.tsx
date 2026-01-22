@@ -52,7 +52,7 @@ export default function RemindersPage() {
   const handleComplete = async (reminderId: string) => {
     try {
       await updateReminderStatus(reminderId, 'completed');
-      router.push('/photos/new');
+      router.push('/photos/');
     } catch (error) {
       console.error('Failed to complete reminder:', error);
     }

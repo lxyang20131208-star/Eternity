@@ -246,7 +246,7 @@ export default function TodayPage() {
       setLoading(true)
       try {
         const [qRes, aRes] = await Promise.all([
-          supabase.from('questions').select('id, text, text_en, chapter').order('id', { ascending: true }),
+          supabase.from('questions').select('id, text, text_en, chapter').in('scope', ['global', 'user']).order('id', { ascending: true }),
           supabase.from('answer_sessions').select('question_id').eq('project_id', projectId),
         ])
 

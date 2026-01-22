@@ -161,8 +161,8 @@ function buildChapterViews(
 function PathNode({ node, onClick }: { node: PathNodeView; onClick: () => void }) {
   const palette: Record<NodeStatus, string> = {
     locked: 'bg-slate-200 text-slate-500 border-slate-200',
-    available: 'bg-lime-100 text-lime-700 border-lime-300 shadow-[0_8px_24px_rgba(132,204,22,0.35)]',
-    completed: 'bg-emerald-500 text-white border-emerald-500 shadow-[0_10px_30px_rgba(16,185,129,0.45)]',
+    available: 'bg-[#F8F6F2] text-[#8B7355] border-[#E3D6C6] shadow-sm',
+    completed: 'bg-[#8B7355] text-white border-[#8B7355] shadow-md',
   }
 
   return (
@@ -170,7 +170,7 @@ function PathNode({ node, onClick }: { node: PathNodeView; onClick: () => void }
       onClick={onClick}
       className={`relative flex items-center gap-3 rounded-full border px-4 py-2 transition-transform duration-150 hover:-translate-y-0.5 ${palette[node.status]}`}
     >
-      <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/40 bg-white/10 text-base font-semibold">
+      <div className={`flex h-10 w-10 items-center justify-center rounded-full border border-white/40 ${node.status === 'completed' ? 'bg-white/20' : 'bg-[#8B7355]/10'} text-base font-semibold`}>
         {node.status === 'completed' ? '✓' : '•'}
       </div>
       <div className="flex flex-col items-start text-left">
@@ -178,7 +178,7 @@ function PathNode({ node, onClick }: { node: PathNodeView; onClick: () => void }
         <span className="text-xs opacity-80">节点 #{node.question.order}</span>
       </div>
       {node.isToday && node.status === 'available' && (
-        <span className="ml-auto rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-semibold text-lime-700">今天可做</span>
+        <span className="ml-auto rounded-full bg-[#8B7355] px-2 py-0.5 text-[11px] font-semibold text-white">今天可做</span>
       )}
     </button>
   )
@@ -197,9 +197,9 @@ function ChapterCard({
 }) {
   const progress = chapter.total === 0 ? 0 : Math.round((chapter.completed / chapter.total) * 100)
   const statusBadge = chapter.completed >= chapter.total
-    ? { text: '已完成', className: 'bg-emerald-100 text-emerald-700' }
+    ? { text: '已完成', className: 'bg-[#F8F6F2] text-[#8B7355] border border-[#E3D6C6]' }
     : chapter.unlocked
-      ? { text: '已解锁', className: 'bg-lime-100 text-lime-700' }
+      ? { text: '已解锁', className: 'bg-[#F8F6F2] text-[#8B7355] border border-[#E3D6C6]' }
       : { text: '待解锁', className: 'bg-slate-100 text-slate-600' }
 
   // Auto-collapse chapters 3-6, show only first 2 nodes when collapsed
@@ -219,7 +219,7 @@ function ChapterCard({
     <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-b from-white via-slate-50 to-white p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <div className="h-9 w-9 rounded-full bg-gradient-to-br from-amber-400 to-amber-500 text-center text-lg font-black leading-9 text-white shadow-[0_10px_30px_rgba(251,191,36,0.35)]">
+          <div className="h-9 w-9 rounded-full bg-[#8B7355] text-center text-lg font-black leading-9 text-white shadow-md">
             {chapter.name.at(0)}
           </div>
           <div>
@@ -353,18 +353,18 @@ function DeepSupplementCard({
   const allCompleted = hasRound2 && progress.answered >= progress.total
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border-2 border-dashed border-amber-300 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-50 p-6 shadow-[0_20px_60px_rgba(251,191,36,0.15)]">
-      <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-amber-200/30 blur-2xl" />
-      <div className="absolute -bottom-8 -left-8 h-32 w-32 rounded-full bg-orange-200/30 blur-2xl" />
+    <div className="relative overflow-hidden rounded-2xl border border-[#E3D6C6] bg-[#F8F6F2] p-6 shadow-sm">
+      <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-[#B89B72]/10 blur-2xl" />
+      <div className="absolute -bottom-8 -left-8 h-32 w-32 rounded-full bg-[#B89B72]/10 blur-2xl" />
 
       <div className="relative">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-2xl shadow-lg">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#8B7355]/10 text-2xl border border-[#8B7355]/20 text-[#8B7355]">
             {hasRound2 ? (allCompleted ? '✓' : '📝') : '🔍'}
           </div>
           <div>
-            <h3 className="text-lg font-bold text-slate-900">深度补充</h3>
-            <p className="text-sm text-slate-600">AI 分析您的故事，补充关键细节</p>
+            <h3 className="text-lg font-bold text-[#2C2C2C]">深度补充</h3>
+            <p className="text-sm text-[#5A4F43]/80">AI 分析您的故事，补充关键细节</p>
           </div>
         </div>
 
@@ -385,7 +385,7 @@ function DeepSupplementCard({
               <button
                 onClick={handleAnalyze}
                 disabled={analyzing}
-                className="w-full rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-3 text-base font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl disabled:opacity-50"
+                className="w-full rounded-xl bg-[#8B7355] px-6 py-3 text-base font-semibold text-white shadow-md transition hover:-translate-y-0.5 hover:bg-[#6D5A43] disabled:opacity-50"
               >
                 {analyzing ? (
                   <span className="flex items-center justify-center gap-2">
@@ -400,31 +400,31 @@ function DeepSupplementCard({
                 )}
               </button>
             )}
-            <p className="mt-3 text-center text-xs text-slate-500">
+            <p className="mt-3 text-center text-xs text-[#8C8377]">
               AI 会分析您的回答，找出需要补充的冲突、感官细节和金句
             </p>
           </div>
         ) : (
           <div className="mt-5">
             <div className="mb-4 flex items-center justify-between text-sm">
-              <span className="text-slate-600">补充问题进度</span>
-              <span className="font-semibold text-amber-600">
+              <span className="text-[#5A4F43]">补充问题进度</span>
+              <span className="font-semibold text-[#8B7355]">
                 {progress.answered} / {progress.total} 已完成
               </span>
             </div>
-            <div className="mb-4 h-2 overflow-hidden rounded-full bg-amber-100">
+            <div className="mb-4 h-2 overflow-hidden rounded-full bg-[#E3D6C6]/30">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 transition-all"
+                className="h-full rounded-full bg-[#8B7355] transition-all"
                 style={{ width: `${(progress.answered / progress.total) * 100}%` }}
               />
             </div>
             <div className="flex gap-3">
               <button
                 onClick={() => router.push('/round2')}
-                className={`flex-1 rounded-xl px-6 py-3 text-base font-semibold shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl ${
+                className={`flex-1 rounded-xl px-6 py-3 text-base font-semibold shadow-md transition hover:-translate-y-0.5 ${
                   allCompleted
-                    ? 'bg-emerald-500 text-white'
-                    : 'bg-gradient-to-r from-amber-500 to-orange-500 text-white'
+                    ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                    : 'bg-[#8B7355] text-white hover:bg-[#6D5A43]'
                 }`}
               >
                 {allCompleted ? '查看补充回答' : '继续回答'}
@@ -432,12 +432,12 @@ function DeepSupplementCard({
               <button
                 onClick={handleAnalyze}
                 disabled={analyzing}
-                className="rounded-xl border-2 border-amber-400 bg-white px-4 py-3 text-sm font-semibold text-amber-600 shadow transition hover:-translate-y-0.5 hover:bg-amber-50 hover:shadow-lg disabled:opacity-50"
+                className="rounded-xl border border-[#8B7355]/30 bg-white px-4 py-3 text-sm font-semibold text-[#8B7355] shadow-sm transition hover:-translate-y-0.5 hover:bg-[#F8F6F2] disabled:opacity-50"
               >
                 {analyzing ? '分析中...' : '重新分析'}
               </button>
             </div>
-            <p className="mt-3 text-center text-xs text-slate-500">
+            <p className="mt-3 text-center text-xs text-[#8C8377]">
               重新分析将生成新的补充问题（约30-40道）
             </p>
           </div>
@@ -446,6 +446,8 @@ function DeepSupplementCard({
     </div>
   )
 }
+
+import UnifiedNav from '../components/UnifiedNav';
 
 export default function ProgressPage() {
   const router = useRouter()
@@ -515,19 +517,19 @@ export default function ProgressPage() {
       setLoading(true)
       try {
         const [{ data: qData, error: qErr }, { data: aData, error: aErr }] = await Promise.all([
-          supabase.from('questions').select('id, text, chapter').order('id', { ascending: true }),
+          supabase.from('questions').select('id, text, chapter').in('scope', ['global', 'user']).order('id', { ascending: true }),
           supabase.from('answer_sessions').select('question_id').eq('project_id', projectId),
         ])
 
         if (qErr) throw qErr
         if (aErr) throw aErr
 
-        const normalized = qData?.length ? normalizeQuestions(qData) : MOCK_QUESTIONS
+        const normalized = qData?.length ? normalizeQuestions(qData) : []
         setQuestions(normalized)
         setCompletedIds(new Set((aData ?? []).map((r: any) => String(r.question_id))))
       } catch (e: any) {
         setError(e?.message ?? '加载数据失败')
-        if (!questions.length) setQuestions(MOCK_QUESTIONS)
+        if (!questions.length) setQuestions([])
       } finally {
         setLoading(false)
       }
@@ -539,9 +541,6 @@ export default function ProgressPage() {
   const chapters = useMemo(() => groupChapters(questions), [questions])
   const views = useMemo(() => buildChapterViews(chapters, completedIds, expanded), [chapters, completedIds, expanded])
 
-  const [showSheet, setShowSheet] = useState(false)
-  const [sheetChapterIdx, setSheetChapterIdx] = useState<number | null>(null)
-
   function handleNodeClick(node: PathNodeView) {
     if (node.status === 'locked') {
       setToast('完成上一关后解锁')
@@ -550,269 +549,215 @@ export default function ProgressPage() {
     }
 
     // Link to主答题页并携带 questionId
-    router.push(`/?questionId=${encodeURIComponent(node.question.id)}`)
+    router.push(`/main?questionId=${encodeURIComponent(node.question.id)}`)
   }
 
-  function openSheetForChapter(idx: number) {
-    setSheetChapterIdx(idx)
-    setShowSheet(true)
-  }
-
-  function closeSheet() {
-    setShowSheet(false)
-    setSheetChapterIdx(null)
+  function getChapterJumpNode(chapter: ChapterView): PathNodeView | null {
+    return chapter.nodes.find((node) => node.status !== 'locked') || chapter.nodes[0] || null
   }
 
   if (loading && !questions.length) {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
+      <main className="min-h-screen bg-[#F7F5F2]" style={{ fontFamily: '"Source Han Serif SC", "Songti SC", "SimSun", serif' }}>
+        <div style={{ maxWidth: 1400, margin: '0 auto' }}>
+          <UnifiedNav />
+        </div>
         <div className="mx-auto max-w-5xl px-4 py-12 text-slate-600">正在加载章节路径…</div>
       </main>
     )
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
-      <div className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-10">
-        <header className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="text-sm font-semibold uppercase tracking-[0.2em] text-lime-600">Chapter Path</div>
-            <h1 className="mt-1 text-3xl font-bold text-slate-900">章节路径 / 地图关卡</h1>
-
-          </div>
-          <div className="flex items-center gap-3">
-            <Link
-              href="/main"
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
-            >
-              返回主页
-            </Link>
-            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-[0_10px_30px_rgba(15,23,42,0.08)]">
-              <div className="text-xs text-slate-500">账号</div>
-              <div className="text-slate-800">{userEmail || '未登录'}</div>
+    <main className="min-h-screen bg-[#F7F5F2]" style={{ fontFamily: '"Source Han Serif SC", "Songti SC", "SimSun", serif' }}>
+      <div style={{ maxWidth: 1400, margin: '0 auto' }}>
+        <UnifiedNav />
+        
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-[#2C2C2C]">
+                章节路径 / 地图关卡
+              </h1>
+              <p className="text-[#666666] mt-1">
+                完成问答，解锁人生新篇章
+              </p>
             </div>
-          </div>
-        </header>
+            {/* Nav links removed as UnifiedNav handles them now */}
+          </header>
 
-        {error && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
-        )}
+          {error && (
+            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+          )}
 
-        <section>
-          <style>{`
-            /* Demo map styles (scoped) */
-            .map-wrap{ display:grid; grid-template-columns: 2fr 1fr; gap:20px; align-items:start; }
-            .map{ position:relative; border:1px solid #E6E0D6; background: rgba(255,255,255,.9); border-radius:24px; padding:28px 14px 28px; box-shadow:0 10px 30px rgba(0,0,0,.06); }
-            .path{ position:relative; max-width:640px; margin:0 auto; padding:12px 0 24px; }
-            .path-line{ position:absolute; left:50%; top:0; bottom:0; width:6px; transform:translateX(-50%); border-radius:999px; background: linear-gradient(180deg, rgba(19,181,122,.16), rgba(246,183,60,.12)); opacity:.75; }
-            .node{ position: relative; width:100%; height:120px; display:flex; align-items:center; justify-content:center; }
-            .node-inner{ position:absolute; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:12px; }
-            .node[data-side="left"] .node-inner{ transform: translateX(-50%) translateX(-140px); }
-            .node[data-side="right"] .node-inner{ transform: translateX(-50%) translateX(140px); }
-            .bubble{ width:74px; height:74px; border-radius:999px; display:flex; align-items:center; justify-content:center; font-weight:800; cursor:pointer; border:2px solid rgba(0,0,0,.06); box-shadow:0 14px 30px rgba(0,0,0,.10); background:#fff; transition:transform .15s ease; }
-            .bubble:hover{ transform: translateY(-2px) scale(1.02); }
-            .label{ min-width:240px; max-width:320px; padding:10px 12px; border-radius:14px; border:1px solid #E6E0D6; background: rgba(255,255,255,.86); box-shadow:0 10px 22px rgba(0,0,0,.06); }
-            .label .title{ font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px; margin-bottom:4px; }
-            .label .meta{ font-size:12px; color:#6B7280; display:flex; gap:10px; }
-            .deep-area{ position:sticky; top:92px; }
-            @media (max-width:720px){ .map-wrap{ grid-template-columns:1fr; } .node[data-side="left"] .node-inner{ transform: translateX(-50%) translateX(-92px);} .node[data-side="right"] .node-inner{ transform: translateX(-50%) translateX(92px);} }
-          `}</style>
+          <section className="mt-6">
+            <style>{`
+              /* Demo map styles (scoped) */
+              .map-wrap{ display:grid; grid-template-columns: 2fr 1fr; gap:20px; align-items:start; }
+              .map{ position:relative; border:1px solid #E6E0D6; background: rgba(255,255,255,.9); border-radius:24px; padding:28px 14px 28px; box-shadow:0 10px 30px rgba(0,0,0,.06); }
+              .path{ position:relative; max-width:640px; margin:0 auto; padding:12px 0 24px; }
+              .path-line{ position:absolute; left:50%; top:0; bottom:0; width:6px; transform:translateX(-50%); border-radius:999px; background: linear-gradient(180deg, rgba(139,115,85,.16), rgba(184,155,114,.12)); opacity:.75; }
+              .node{ position: relative; width:100%; height:120px; display:flex; align-items:center; justify-content:center; }
+              .node-inner{ position:absolute; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:12px; transition: all 0.3s ease; }
+              
+              /* Desktop Alternating Layout */
+              .node[data-side="left"] .node-inner{ transform: translateX(-50%) translateX(-140px); flex-direction: row-reverse; text-align: right; }
+              .node[data-side="left"] .label .title { justify-content: flex-end; }
+              .node[data-side="left"] .label .meta { justify-content: flex-end; }
+              
+              .node[data-side="right"] .node-inner{ transform: translateX(-50%) translateX(140px); }
+              
+              .bubble{ width:74px; height:74px; border-radius:999px; display:flex; align-items:center; justify-content:center; font-weight:800; cursor:pointer; border:2px solid rgba(0,0,0,.06); box-shadow:0 14px 30px rgba(0,0,0,.10); background:#fff; transition:transform .15s ease; flex-shrink: 0; }
+                .bubble:hover{ transform: translateY(-2px) scale(1.02); }
+                .label{ min-width:240px; max-width:320px; padding:10px 12px; border-radius:14px; border:1px solid #E6E0D6; background: rgba(255,255,255,.86); box-shadow:0 10px 22px rgba(0,0,0,.06); }
+                .label .title{ font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+                .label .meta{ font-size:12px; color:#6B7280; display:flex; gap:10px; }
+                .deep-area{ position:sticky; top:92px; }
 
-          <div className="map-wrap">
-            <div className="map-area">
-              <div className="map">
-                <div className="path">
-                  <div className="path-line" />
-                  {(() => {
-                    const sidePattern = ['left','center','right','center','left','center','right']
-                    const currentIndex = views.findIndex(v => v.unlocked && v.completed < v.total)
-                    return views.map((ch, idx) => {
-                      const state = !ch.unlocked ? 'locked' : (ch.completed >= ch.total ? 'done' : (idx === currentIndex ? 'current' : 'open'))
-                      const side = sidePattern[idx % sidePattern.length]
-                      const tagText = state === 'done' ? '已完成' : state === 'current' ? '下一关' : state === 'open' ? '已解锁' : `锁定 · 需${NEXT_CHAPTER_THRESHOLD}题`
-                      return (
-                        <div className={`node state-${state}`} data-side={side} key={ch.name}>
-                          <div className="node-inner">
-                            <div
-                              className="bubble"
-                              onClick={() => openSheetForChapter(idx)}
-                              aria-label={ch.name}
-                            >
-                              {state === 'locked' ? '🔒' : (state === 'open' || state === 'current' ? <span style={{fontSize:14}}>{idx+1}</span> : '')}
-                            </div>
+                /* Mobile Responsive Styles */
+                @media (max-width: 768px) {
+                  .map-wrap{ grid-template-columns:1fr; gap: 32px; }
+                  .deep-area{ position:static; margin-top: 0; }
+                  
+                  /* Mobile Vertical Timeline */
+                  .path-line { left: 24px; transform: none; width: 4px; }
+                  .path { padding: 0 0 24px; }
+                  .node { height: auto; min-height: 80px; margin-bottom: 20px; justify-content: flex-start; padding-left: 60px; }
+                  
+                  /* Reset all transform logic for mobile */
+                  .node-inner, 
+                  .node[data-side="left"] .node-inner, 
+                  .node[data-side="right"] .node-inner { 
+                    position: relative; 
+                    left: auto; 
+                    transform: none !important; 
+                    flex-direction: row !important; 
+                    text-align: left !important; 
+                    width: 100%; 
+                    gap: 12px;
+                  }
+                  
+                  /* Reset label alignment */
+                  .node[data-side="left"] .label .title,
+                  .node[data-side="right"] .label .title,
+                  .node[data-side="left"] .label .meta,
+                  .node[data-side="right"] .label .meta { justify-content: flex-start; }
+  
+                  /* Adjust Bubble Position */
+                  .bubble { 
+                    width: 48px; 
+                    height: 48px; 
+                    position: absolute; 
+                    left: -52px; /* Relative to padding-left: 60px */
+                    top: 0;
+                    margin-top: 0;
+                    font-size: 14px;
+                  }
 
-                            <div className="label">
-                              <div className="title">
-                                <span>{idx+1}. {ch.name}</span>
-                                <span style={{display:'inline-flex',alignItems:'center',gap:6,padding:'3px 8px',borderRadius:999,fontSize:11,border:'1px solid #E6E0D6',background:'rgba(250,250,247,.8)'}}>{tagText}</span>
+                  /* Adjust Label Width */
+                  .label { 
+                    min-width: auto; 
+                    max-width: 100%; 
+                    width: 100%; 
+                    padding: 10px;
+                  }
+                  
+                  .label .title { font-size: 13px; flex-wrap: wrap; gap: 4px; }
+                  .label .meta { flex-wrap: wrap; gap: 6px; }
+                  
+                  /* Container adjustments */
+                  .map { padding: 20px 12px; border-radius: 16px; }
+                }
+            `}</style>
+
+            <div className="map-wrap">
+              <div className="map-area">
+                <div className="map">
+                  <div className="path">
+                    <div className="path-line" />
+                    {(() => {
+                      const sidePattern = ['left','center','right','center','left','center','right']
+                      const currentIndex = views.findIndex(v => v.unlocked && v.completed < v.total)
+                      return views.map((ch, idx) => {
+                        const state = !ch.unlocked ? 'locked' : (ch.completed >= ch.total ? 'done' : (idx === currentIndex ? 'current' : 'open'))
+                        const side = sidePattern[idx % sidePattern.length]
+                        const tagText = state === 'done' ? '已完成' : state === 'current' ? '下一关' : state === 'open' ? '已解锁' : `锁定 · 需${NEXT_CHAPTER_THRESHOLD}题`
+                        const jumpNode = getChapterJumpNode(ch)
+                        return (
+                          <div className={`node state-${state}`} data-side={side} key={ch.name}>
+                            <div className="node-inner">
+                              <div
+                                className="bubble"
+                                onClick={() => jumpNode && handleNodeClick(jumpNode)}
+                                aria-label={ch.name}
+                              >
+                                {state === 'locked' ? '🔒' : (state === 'open' || state === 'current' ? <span style={{fontSize:14}}>{idx+1}</span> : '')}
                               </div>
-                              <div className="meta">
-                                <span>{ch.completed}/{ch.total} 节点</span>
-                                <span style={{color:'#9A8F7A'}}>·</span>
-                                <span>{state === 'locked' ? `点一下看看如何解锁` : '点击开始 / 查看'}</span>
+
+                              <div
+                                className="label cursor-pointer"
+                                onClick={() => jumpNode && handleNodeClick(jumpNode)}
+                                role="button"
+                                tabIndex={0}
+                              >
+                                <div className="title">
+                                  <span>{idx+1}. {ch.name}</span>
+                                  <span style={{display:'inline-flex',alignItems:'center',gap:6,padding:'3px 8px',borderRadius:999,fontSize:11,border:'1px solid #E6E0D6',background:'rgba(250,250,247,.8)'}}>{tagText}</span>
+                                </div>
+                                <div className="meta">
+                                  <span>{ch.completed}/{ch.total} 节点</span>
+                                  <span style={{color:'#9A8F7A'}}>·</span>
+                                  <span>{state === 'locked' ? `点一下看看如何解锁` : '点击开始 / 查看'}</span>
+                                </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      )
-                    })
-                  })()}
+                        )
+                      })
+                    })()}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <aside className="deep-area">
-              {projectId && (
-                completedIds.size >= SECOND_ROUND_UNLOCK_THRESHOLD ? (
-                  <DeepSupplementCard
-                    projectId={projectId}
-                    onAnalysisComplete={() => { setToast('分析完成！已生成补充问题'); setTimeout(() => setToast(null), 3000) }}
-                  />
-                ) : (
-                  <div onClick={() => setShowLockModal(true)} className="relative overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 p-6 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
-                    <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-slate-200/30 blur-2xl" />
-                    <div className="absolute -bottom-8 -left-8 h-32 w-32 rounded-full bg-slate-200/30 blur-2xl" />
+              <aside className="deep-area">
+                {projectId && (
+                  completedIds.size >= SECOND_ROUND_UNLOCK_THRESHOLD ? (
+                    <DeepSupplementCard
+                      projectId={projectId}
+                      onAnalysisComplete={() => { setToast('分析完成！已生成补充问题'); setTimeout(() => setToast(null), 3000) }}
+                    />
+                  ) : (
+                    <div onClick={() => setShowLockModal(true)} className="relative overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 p-6 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
+                      <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-slate-200/30 blur-2xl" />
+                      <div className="absolute -bottom-8 -left-8 h-32 w-32 rounded-full bg-slate-200/30 blur-2xl" />
 
-                    <div className="relative">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-slate-300 to-slate-400 text-2xl shadow-lg">🔒</div>
-                        <div>
-                          <h3 className="text-lg font-bold text-slate-500">深度补充</h3>
-                          <p className="text-sm text-slate-400">完成 {SECOND_ROUND_UNLOCK_THRESHOLD} 道问题后解锁</p>
+                      <div className="relative">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-slate-300 to-slate-400 text-2xl shadow-lg">🔒</div>
+                          <div>
+                            <h3 className="text-lg font-bold text-slate-500">深度补充</h3>
+                            <p className="text-sm text-slate-400">完成 {SECOND_ROUND_UNLOCK_THRESHOLD} 道问题后解锁</p>
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="mt-5">
-                        <div className="rounded-lg bg-slate-100 px-4 py-3 text-sm text-slate-500">
-                          当前进度: {completedIds.size} / {SECOND_ROUND_UNLOCK_THRESHOLD}
-                          <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
-                            <div className="h-full rounded-full bg-slate-400 transition-all" style={{ width: `${Math.min(100, (completedIds.size / SECOND_ROUND_UNLOCK_THRESHOLD) * 100)}%` }} />
+                        <div className="mt-5">
+                          <div className="rounded-lg bg-slate-100 px-4 py-3 text-sm text-slate-500">
+                            当前进度: {completedIds.size} / {SECOND_ROUND_UNLOCK_THRESHOLD}
+                            <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
+                              <div className="h-full rounded-full bg-slate-400 transition-all" style={{ width: `${Math.min(100, (completedIds.size / SECOND_ROUND_UNLOCK_THRESHOLD) * 100)}%` }} />
+                            </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                )
-              )}
-            </aside>
-          </div>
-
-          {/* bottom sheet for chapter */}
-          <div className={`sheet-backdrop ${showSheet ? 'show' : ''}`} onClick={closeSheet} />
-          <div className={`sheet ${showSheet ? 'show' : ''}`} role="dialog" aria-modal="true" aria-hidden={!showSheet}>
-            <div className="sheet-header"><div className="grabber" /></div>
-            <div className="sheet-body">
-              <div className="sheet-title">
-                <h3 id="sheetTitle">{sheetChapterIdx !== null ? `${sheetChapterIdx+1}. ${views[sheetChapterIdx].name}` : '章节'}</h3>
-                <div className="mini" id="sheetMeta">{sheetChapterIdx !== null ? `${views[sheetChapterIdx].completed}/${views[sheetChapterIdx].total} 节点` : ''}</div>
-              </div>
-              <p className="sheet-desc">{sheetChapterIdx !== null ? (views[sheetChapterIdx].nodes[0]?.question?.chapter ?? '') : ''}</p>
-              <div className="sheet-actions">
-                <button className="primary" id="sheetPrimary" onClick={() => {
-                  if (sheetChapterIdx === null) return;
-                  const chapter = views[sheetChapterIdx];
-                  const node = chapter.nodes.find(n => n.status !== 'locked');
-                  if (!node) { console.warn('当前章无可用题目'); return; }
-                  closeSheet();
-                  handleNodeClick(node);
-                }}>开始</button>
-                <button className="secondary" id="sheetSecondary" onClick={closeSheet}>稍后再说</button>
-              </div>
+                  )
+                )}
+              </aside>
             </div>
-          </div>
-        </section>
 
-        {views.length === 0 && (
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center text-slate-500 shadow-sm">
-            暂无题目可展示，请先在题库创建问题。
-          </div>
-        )}
-
-        {projectId && (
-          <section className="mt-4">
-            {completedIds.size >= SECOND_ROUND_UNLOCK_THRESHOLD ? (
-              <DeepSupplementCard
-                projectId={projectId}
-                onAnalysisComplete={() => {
-                  setToast('分析完成！已生成补充问题')
-                  setTimeout(() => setToast(null), 3000)
-                }}
-              />
-            ) : (
-              /* Locked Second Round Card */
-              <div
-                onClick={() => setShowLockModal(true)}
-                className="relative overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 p-6 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
-              >
-                <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-slate-200/30 blur-2xl" />
-                <div className="absolute -bottom-8 -left-8 h-32 w-32 rounded-full bg-slate-200/30 blur-2xl" />
-
-                <div className="relative">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-slate-300 to-slate-400 text-2xl shadow-lg">
-                      🔒
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-bold text-slate-500">深度补充</h3>
-                      <p className="text-sm text-slate-400">完成 {SECOND_ROUND_UNLOCK_THRESHOLD} 道问题后解锁</p>
-                    </div>
-                  </div>
-
-                  <div className="mt-5">
-                    <div className="rounded-lg bg-slate-100 px-4 py-3 text-sm text-slate-500">
-                      当前进度: {completedIds.size} / {SECOND_ROUND_UNLOCK_THRESHOLD}
-                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
-                        <div
-                          className="h-full rounded-full bg-slate-400 transition-all"
-                          style={{ width: `${Math.min(100, (completedIds.size / SECOND_ROUND_UNLOCK_THRESHOLD) * 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
           </section>
-        )}
-      </div>
 
-      {/* Lock Modal */}
-      {showLockModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setShowLockModal(false)}
-        >
-          <div
-            className="mx-4 max-w-sm rounded-2xl bg-white p-8 text-center shadow-2xl"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="text-5xl mb-4">🔒</div>
-            <h3 className="text-xl font-bold text-slate-900 mb-2">深度补充 尚未解锁</h3>
-            <p className="text-slate-600 mb-6">
-              完成 <strong className="text-amber-600">{SECOND_ROUND_UNLOCK_THRESHOLD}</strong> 道问题后即可解锁该功能
-            </p>
-            <div className="bg-slate-50 rounded-lg p-4 mb-6">
-              <div className="text-sm text-slate-500 mb-1">当前进度</div>
-              <div className="text-2xl font-bold text-slate-900">
-                {completedIds.size} / {SECOND_ROUND_UNLOCK_THRESHOLD}
-              </div>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 transition-all"
-                  style={{ width: `${Math.min(100, (completedIds.size / SECOND_ROUND_UNLOCK_THRESHOLD) * 100)}%` }}
-                />
-              </div>
-            </div>
-            <button
-              onClick={() => setShowLockModal(false)}
-              className="w-full rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-3 text-base font-semibold text-white shadow-lg transition hover:shadow-xl"
-            >
-              继续答题
-            </button>
-          </div>
         </div>
-      )}
-
+      </div>
       {toast && <Toast text={toast} />}
     </main>
   )

@@ -13,6 +13,9 @@ export interface Person {
   bio_snippet?: string;
   importance_score: number;
   created_from?: string;
+  relationship_to_user?: string;
+  extraction_status?: string;
+  confidence_score?: number;
   metadata: Record<string, any>;
   created_at: string;
   updated_at: string;
@@ -195,4 +198,84 @@ export interface PeopleFilters {
   roles?: string[];
   minImportance?: number;
   hasAvatar?: boolean;
+}
+
+// ====================================
+// 人物合并相关类型
+// ====================================
+
+export interface MergeLog {
+  id: string;
+  project_id: string;
+  primary_person_id: string;
+  secondary_person_id: string;
+  merged_by?: string;
+  merged_at: string;
+  merge_strategy: 'keep_primary' | 'keep_secondary' | 'custom';
+  details: {
+    aliasCount?: number;
+    photoCount?: number;
+    relationshipCount?: number;
+    bioSource?: string;
+  };
+  rollback_data?: {
+    person: Person;
+    photos: any[];
+    relationships: any[];
+  };
+  status: 'active' | 'undone';
+  created_at: string;
+}
+
+export interface DuplicatePair {
+  personAId: string;
+  personBId: string;
+  similarity: number;
+  reason: 'exact_alias' | 'alias_match' | 'name_similar' | 'alias_intersection';
+}
+
+export interface DuplicateGroup {
+  groupId: string;
+  personIds: string[];
+  pairs: DuplicatePair[];
+  details: Array<{
+    id: string;
+    name: string;
+    aliases: string[];
+    importance_score: number;
+  }>;
+}
+
+export interface MergeRequest {
+  projectId: string;
+  primaryPersonId: string;
+  secondaryPersonId: string;
+  mergeStrategy: 'keep_primary' | 'keep_secondary' | 'custom';
+  customData?: {
+    name?: string;
+    aliases?: string[];
+    bio_snippet?: string;
+    relationship_to_user?: string;
+  };
+}
+
+export interface MergeResponse {
+  success: boolean;
+  mergedPerson?: Person;
+  mergeLog?: {
+    mergeLogId: string;
+    aliasCount: number;
+    photoCount: number;
+    relationshipCount: number;
+    deletedPersonId: string;
+    mergedAt: string;
+  };
+  error?: string;
+}
+
+export interface DetectDuplicatesResponse {
+  success: boolean;
+  duplicateGroups: DuplicateGroup[];
+  totalDuplicates: number;
+  processingTime: number;
 }

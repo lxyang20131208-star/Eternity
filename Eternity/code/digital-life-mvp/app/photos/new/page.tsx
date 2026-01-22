@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 
 // Basic types
@@ -17,7 +18,15 @@ export type PhotoItem = {
   fileName: string
   previewUrl: string
   remoteUrl?: string
+  // 5-field annotation
+  linkedQuestionId?: string
   people: Person[]
+  timeTaken?: string
+  timePrecision: 'exact' | 'year' | 'month' | 'range' | 'fuzzy'
+  placeId?: string
+  placeName?: string
+  caption?: string
+  // Legacy scene fields
   scene: {
     location?: string
     date?: string
@@ -27,31 +36,74 @@ export type PhotoItem = {
   }
 }
 
-type Step = 1 | 2 | 3 | 4
+type Question = {
+  id: string
+  question_text: string
+  category?: string
+}
 
-// Mock existing contacts; in real app fetch from backend
+type Place = {
+  id: string
+  name: string
+  description?: string
+}
+
+type Step = 1 | 2 | 3 | 4 | 5
+
 const LOCAL_ROSTER_KEY = "photoFlow.peopleRoster"
 const LOCAL_PHOTOS_KEY = "photoFlow.photos"
 const LOCAL_SAVE_KEY = "photoFlow.lastSaved"
 
-// Start with empty roster - users will create people with proper UUIDs
 const EXISTING_PEOPLE: Person[] = []
 
-// UUID validation helper
 const isValidUUID = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
 
 export default function NewPhotoFlow() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [step, setStep] = useState<Step>(1)
+  const [prefilledPersonId, setPrefilledPersonId] = useState<string | null>(null)
   const [status, setStatus] = useState<"idle" | "uploading" | "uploaded" | "annotating">("idle")
   const [photos, setPhotos] = useState<PhotoItem[]>([])
   const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [peopleRoster, setPeopleRoster] = useState<Person[]>(EXISTING_PEOPLE)
+  const [questions, setQuestions] = useState<Question[]>([])
+  const [places, setPlaces] = useState<Place[]>([])
   const [toast, setToast] = useState<{ text: string; type: "success" | "error" } | null>(null)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
+  const [newPlaceName, setNewPlaceName] = useState("")
   const inputRef = useRef<HTMLInputElement | null>(null)
   const hasHydratedRoster = useRef(false)
   const hasHydratedPhotos = useRef(false)
+
+  // Load questions and places
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) return
+
+        // Load questions (排除 trial 问题，只显示核心问题和用户自定义问题)
+        const { data: questionsData } = await supabase
+          .from('questions')
+          .select('id, question_text, category')
+          .in('scope', ['global', 'user'])  // 排除 trial 问题
+          .order('category', { ascending: true })
+        if (questionsData) setQuestions(questionsData)
+
+        // Load places
+        const { data: placesData } = await supabase
+          .from('places')
+          .select('id, name, description')
+          .order('name', { ascending: true })
+        if (placesData) setPlaces(placesData)
+      } catch (e) {
+        console.warn("Failed to load questions/places", e)
+      }
+    }
+    loadData()
+  }, [])
 
   // Paste-to-upload
   useEffect(() => {
@@ -75,7 +127,6 @@ export default function NewPhotoFlow() {
       if (raw) {
         const parsed = JSON.parse(raw) as Person[]
         if (Array.isArray(parsed)) {
-          // Filter out any people with invalid UUIDs (legacy data cleanup)
           const validPeople = parsed.filter(p => isValidUUID(p.id))
           setPeopleRoster(validPeople)
         }
@@ -112,20 +163,18 @@ export default function NewPhotoFlow() {
     }
   }, [peopleRoster])
 
-  // Load photo annotations from backend on mount
+  // Load people roster from backend on mount (but NOT photos - this is for NEW uploads only)
   useEffect(() => {
     if (hasHydratedPhotos.current) return
     hasHydratedPhotos.current = true
-    
-    async function loadFromBackend() {
+
+    async function loadRosterOnly() {
       try {
         const { data: { session } } = await supabase.auth.getSession()
-        if (!session) {
-          // Try localStorage fallback
-          loadFromLocalStorage()
-          return
-        }
+        if (!session) return
 
+        // Only load the people roster, not the photos
+        // /photos/new is for NEW uploads - it should not load already saved photos
         const response = await fetch('/api/photos/save', {
           headers: {
             'Authorization': `Bearer ${session.access_token}`
@@ -133,54 +182,62 @@ export default function NewPhotoFlow() {
         })
 
         if (response.ok) {
-          const { photos: loadedPhotos, roster: loadedRoster } = await response.json()
-          if (loadedPhotos?.length) {
-            setPhotos(loadedPhotos)
-            setSelectedPhotoId(loadedPhotos[0].id)
-            setStep(2)
-          }
+          const { roster: loadedRoster } = await response.json()
+          // Only load the roster (people list), NOT the photos
           if (loadedRoster?.length) {
             setPeopleRoster(loadedRoster)
           }
-        } else {
-          loadFromLocalStorage()
         }
       } catch (e) {
-        console.warn("Backend load failed, trying localStorage", e)
-        loadFromLocalStorage()
+        console.warn("Backend roster load failed", e)
       }
     }
 
-    function loadFromLocalStorage() {
-      if (typeof window === "undefined") return
-      try {
-        const raw = window.localStorage.getItem(LOCAL_PHOTOS_KEY)
-        if (raw) {
-          const parsed = JSON.parse(raw) as PhotoItem[]
-          if (Array.isArray(parsed)) {
-            const filtered = parsed.filter((p) => {
-              const preview = p.previewUrl || p.remoteUrl
-              if (!preview) return false
-              return !preview.startsWith("blob:")
-            })
-            const normalized = filtered.map((p) => ({
-              ...p,
-              previewUrl: p.previewUrl || p.remoteUrl || "",
-            }))
-            if (normalized.length) {
-              setPhotos(normalized)
-              setSelectedPhotoId(normalized[0].id)
-              setStep(2)
-            }
-          }
-        }
-      } catch (e) {
-        console.warn("Photo restore failed", e)
-      }
-    }
-
-    loadFromBackend()
+    loadRosterOnly()
   }, [])
+
+  // Handle URL params for pre-filling person from Family page
+  useEffect(() => {
+    const personId = searchParams.get('personId')
+    const personName = searchParams.get('personName')
+
+    if (personId && personName && isValidUUID(personId)) {
+      setPrefilledPersonId(personId)
+
+      // Check if person already exists in roster
+      const existingPerson = peopleRoster.find(p => p.id === personId)
+      if (!existingPerson) {
+        // Add the person to the roster
+        const newPerson: Person = {
+          id: personId,
+          name: decodeURIComponent(personName),
+        }
+        setPeopleRoster(prev => [...prev, newPerson])
+      }
+
+      // Show a toast notification
+      showToast(`已预选人物：${decodeURIComponent(personName)}`, "success")
+    }
+  }, [searchParams, peopleRoster])
+
+  // Auto-add prefilled person to current photo when photo is created
+  useEffect(() => {
+    if (prefilledPersonId && photos.length > 0) {
+      const person = peopleRoster.find(p => p.id === prefilledPersonId)
+      if (person) {
+        // Add person to all photos that don't have them yet
+        setPhotos(prev => prev.map(photo => {
+          const hasPerson = photo.people.some(p => p.id === prefilledPersonId)
+          if (!hasPerson) {
+            return { ...photo, people: [...photo.people, person] }
+          }
+          return photo
+        }))
+        // Clear the prefilled person after adding
+        setPrefilledPersonId(null)
+      }
+    }
+  }, [prefilledPersonId, photos.length, peopleRoster])
 
   // Persist photo annotations
   useEffect(() => {
@@ -195,6 +252,18 @@ export default function NewPhotoFlow() {
 
   const currentPhoto = useMemo(() => photos.find((p) => p.id === selectedPhotoId) ?? photos[0], [photos, selectedPhotoId])
   const canContinue = step === 1 ? photos.length > 0 : true
+
+  // Calculate completion status for current photo
+  const completionStatus = useMemo(() => {
+    if (!currentPhoto) return { complete: false, missing: [] as string[] }
+    const missing: string[] = []
+    if (!currentPhoto.linkedQuestionId) missing.push('问题')
+    if (!currentPhoto.people.length) missing.push('人物')
+    if (!currentPhoto.timeTaken) missing.push('时间')
+    if (!currentPhoto.placeId) missing.push('地点')
+    if (!currentPhoto.caption?.trim()) missing.push('描述')
+    return { complete: missing.length === 0, missing }
+  }, [currentPhoto])
 
   function resolvePreviewSource(photo?: PhotoItem) {
     if (!photo) return null
@@ -219,9 +288,6 @@ export default function NewPhotoFlow() {
       for (const file of files) {
         const photoId = crypto.randomUUID()
         const previewUrl = URL.createObjectURL(file)
-
-        // In production: request presigned URL then PUT the file.
-        // Here: simulate remote URL using preview for demo purposes.
         const remoteUrl = await uploadViaPresignedUrl(file).catch(() => previewUrl)
 
         uploaded.push({
@@ -230,6 +296,7 @@ export default function NewPhotoFlow() {
           previewUrl,
           remoteUrl,
           people: [],
+          timePrecision: 'fuzzy',
           scene: { tags: [] },
         })
       }
@@ -248,11 +315,9 @@ export default function NewPhotoFlow() {
     try {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) {
-        // Fallback to local preview if not logged in
         return URL.createObjectURL(file)
       }
 
-      // Get presigned upload URL from backend
       const urlResponse = await fetch('/api/photos/upload-url', {
         method: 'POST',
         headers: {
@@ -271,7 +336,6 @@ export default function NewPhotoFlow() {
 
       const { uploadUrl, fileUrl } = await urlResponse.json()
 
-      // Upload file to Supabase Storage
       await fetch(uploadUrl, {
         method: 'PUT',
         body: file,
@@ -288,6 +352,15 @@ export default function NewPhotoFlow() {
     }
   }
 
+  // Question selection
+  function setLinkedQuestion(questionId: string) {
+    if (!currentPhoto) return
+    setPhotos((prev) =>
+      prev.map((p) => (p.id === currentPhoto.id ? { ...p, linkedQuestionId: questionId } : p))
+    )
+  }
+
+  // People management
   function addPersonToCurrent(person: Person) {
     if (!currentPhoto) return
     setPhotos((prev) =>
@@ -340,6 +413,54 @@ export default function NewPhotoFlow() {
     addPersonToCurrent({ id: crypto.randomUUID(), name: "未知人物", isUnknown: true })
   }
 
+  // Time/Place/Caption updates
+  function updatePhotoField<K extends keyof PhotoItem>(field: K, value: PhotoItem[K]) {
+    if (!currentPhoto) return
+    setPhotos((prev) =>
+      prev.map((p) => (p.id === currentPhoto.id ? { ...p, [field]: value } : p))
+    )
+  }
+
+  async function createPlace(name: string) {
+    if (!name.trim()) return
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        showToast("请先登录", "error")
+        return
+      }
+
+      // Get user's project
+      const { data: project } = await supabase
+        .from('projects')
+        .select('id')
+        .eq('owner_id', session.user.id)
+        .single()
+
+      if (!project) {
+        showToast("未找到项目", "error")
+        return
+      }
+
+      const { data: newPlace, error } = await supabase
+        .from('places')
+        .insert({ name: name.trim(), project_id: project.id })
+        .select()
+        .single()
+
+      if (error) throw error
+      if (newPlace) {
+        setPlaces((prev) => [...prev, newPlace])
+        updatePhotoField('placeId', newPlace.id)
+        updatePhotoField('placeName', newPlace.name)
+        setNewPlaceName("")
+        showToast("地点已创建", "success")
+      }
+    } catch (e: any) {
+      showToast(e?.message || "创建地点失败", "error")
+    }
+  }
+
   function updateScene(partial: Partial<PhotoItem["scene"]>) {
     if (!currentPhoto) return
     setPhotos((prev) =>
@@ -359,9 +480,9 @@ export default function NewPhotoFlow() {
   }
 
   function nextStep() {
-    if (step === 4) return
+    if (step === 5) return
     setStep((s) => (s + 1) as Step)
-    if (step === 2 || step === 3) setStatus("annotating")
+    if (step >= 2) setStatus("annotating")
   }
 
   function prevStep() {
@@ -380,9 +501,8 @@ export default function NewPhotoFlow() {
   async function saveAll() {
     try {
       const { data: { session } } = await supabase.auth.getSession()
-      
+
       if (!session) {
-        // Fallback to localStorage if not logged in
         const payload = { savedAt: new Date().toISOString(), photos, roster: peopleRoster }
         if (typeof window !== "undefined") {
           window.localStorage.setItem(LOCAL_SAVE_KEY, JSON.stringify(payload))
@@ -392,7 +512,6 @@ export default function NewPhotoFlow() {
         return
       }
 
-      // Save to backend
       const response = await fetch('/api/photos/save', {
         method: 'POST',
         headers: {
@@ -409,15 +528,19 @@ export default function NewPhotoFlow() {
       }
 
       const result = await response.json()
-      const savedAt = new Date().toISOString()
-      setLastSavedAt(savedAt)
-      
-      // Also save to localStorage as backup
+
+      // Clear local cache after successful save
       if (typeof window !== "undefined") {
-        window.localStorage.setItem(LOCAL_SAVE_KEY, JSON.stringify({ savedAt, photos, roster: peopleRoster }))
+        window.localStorage.removeItem(LOCAL_PHOTOS_KEY)
+        window.localStorage.removeItem(LOCAL_SAVE_KEY)
       }
-      
+
       showToast(`已保存 ${result.savedCount}/${result.totalCount} 张照片到云端`, "success")
+
+      // Redirect to photos page after a short delay
+      setTimeout(() => {
+        router.push('/photos')
+      }, 1500)
     } catch (e: any) {
       console.error('Save error:', e)
       showToast(e?.message || "保存失败，请稍后重试", "error")
@@ -440,23 +563,42 @@ export default function NewPhotoFlow() {
     }
   }
 
+  const timePrecisionOptions = [
+    { value: 'exact', label: '精确日期' },
+    { value: 'month', label: '精确到月' },
+    { value: 'year', label: '精确到年' },
+    { value: 'range', label: '时间范围' },
+    { value: 'fuzzy', label: '模糊记忆' },
+  ]
+
   const sceneSuggestionTags = ["家庭聚会", "旅行", "毕业", "婚礼", "日常", "工作", "童年"]
+
+  // Group questions by category
+  const questionsByCategory = useMemo(() => {
+    const grouped: Record<string, Question[]> = {}
+    questions.forEach(q => {
+      const cat = q.category || '其他'
+      if (!grouped[cat]) grouped[cat] = []
+      grouped[cat].push(q)
+    })
+    return grouped
+  }, [questions])
 
   return (
     <main style={styles.page}>
       <style>{cssHelpers}</style>
       <div style={styles.headerRow}>
         <div>
-          <div style={styles.kicker}>Photos • Structured Memory</div>
-          <h1 style={styles.title}>上传照片并标记人物 / 场景</h1>
-          <p style={styles.subtitle}>逐步完成上传、人物标记、场景标记，让照片成为可查询的记忆节点。</p>
+          <div style={styles.kicker}>Photos • 5字段标注系统</div>
+          <h1 style={styles.title}>上传照片并完成5字段标注</h1>
+          <p style={styles.subtitle}>每张照片需要：问题关联 + 人物标记 + 拍摄时间 + 拍摄地点 + 描述说明</p>
           {lastSavedAt && (
             <div style={{ color: "#9fb6cc", fontSize: 12, marginTop: 6 }}>上次保存：{new Date(lastSavedAt).toLocaleString()}</div>
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={styles.stepper}>
-            {[1, 2, 3, 4].map((i) => (
+            {[1, 2, 3, 4, 5].map((i) => (
               <div
                 key={i}
                 style={{
@@ -495,6 +637,7 @@ export default function NewPhotoFlow() {
 
       <div style={styles.layout}>
         <div style={styles.leftPanel}>
+          {/* Step 1: Upload */}
           {step === 1 && (
             <div style={styles.card}>
               <div style={styles.cardHeader}>Step 1 · 上传照片</div>
@@ -523,10 +666,53 @@ export default function NewPhotoFlow() {
             </div>
           )}
 
+          {/* Step 2: Select Question */}
           {step === 2 && currentPhoto && (
             <div style={styles.card}>
-              <div style={styles.cardHeader}>Step 2 · 标记人物</div>
-              <p style={styles.cardHint}>选择已有联系人、添加新人物或标记为“未知”。</p>
+              <div style={styles.cardHeader}>Step 2 · 关联问题 <span style={styles.required}>*必填</span></div>
+              <p style={styles.cardHint}>选择这张照片回答的是哪个人生问题，便于后续自动插入自传。</p>
+
+              {currentPhoto.linkedQuestionId && (
+                <div style={styles.selectedBadge}>
+                  已选择: {questions.find(q => q.id === currentPhoto.linkedQuestionId)?.question_text || currentPhoto.linkedQuestionId}
+                </div>
+              )}
+
+              <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                {Object.entries(questionsByCategory).map(([category, categoryQuestions]) => (
+                  <div key={category} style={{ marginBottom: 16 }}>
+                    <div style={styles.sectionLabel}>{category}</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {categoryQuestions.map((q) => (
+                        <button
+                          key={q.id}
+                          style={{
+                            ...styles.questionItem,
+                            background: currentPhoto.linkedQuestionId === q.id ? 'linear-gradient(135deg, rgba(245,217,184,0.6), rgba(239,230,221,0.6))' : '#fff',
+                            borderColor: currentPhoto.linkedQuestionId === q.id ? 'rgba(139,115,85,0.3)' : '#E8E4DE',
+                          }}
+                          onClick={() => setLinkedQuestion(q.id)}
+                        >
+                          {q.question_text}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {questions.length === 0 && (
+                  <div style={{ color: '#94a3b8', textAlign: 'center', padding: 20 }}>
+                    暂无问题，请先在问题库中添加问题
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Mark People */}
+          {step === 3 && currentPhoto && (
+            <div style={styles.card}>
+              <div style={styles.cardHeader}>Step 3 · 标记人物 <span style={styles.required}>*必填</span></div>
+              <p style={styles.cardHint}>选择已有联系人、添加新人物或标记为"未知"。</p>
 
               <div style={styles.chipRow}>
                 {currentPhoto.people.map((p) => (
@@ -553,7 +739,7 @@ export default function NewPhotoFlow() {
               <div style={{ ...styles.personManager, marginTop: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                   <div style={{ fontWeight: 700 }}>已保存的角色</div>
-                  <div style={{ color: "#94a3b8", fontSize: 12 }}>可编辑名称/关系，应用到当前照片</div>
+                  <div style={{ color: "#94a3b8", fontSize: 12 }}>可编辑名称/关系</div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {peopleRoster.map((p) => (
@@ -574,18 +760,70 @@ export default function NewPhotoFlow() {
             </div>
           )}
 
-          {step === 3 && currentPhoto && (
+          {/* Step 4: Time/Place/Caption */}
+          {step === 4 && currentPhoto && (
             <div style={styles.card}>
-              <div style={styles.cardHeader}>Step 3 · 场景标记</div>
-              <p style={styles.cardHint}>补充地点、时间、事件与标签，便于后续检索。</p>
+              <div style={styles.cardHeader}>Step 4 · 时间/地点/描述 <span style={styles.required}>*必填</span></div>
+              <p style={styles.cardHint}>补充拍摄时间、地点和照片描述。</p>
 
               <div style={styles.fieldGrid}>
-                <LabeledInput label="地点" value={currentPhoto.scene.location ?? ""} onChange={(v) => updateScene({ location: v })} placeholder="如：上海徐家汇公园" />
-                <LabeledInput label="日期" type="date" value={currentPhoto.scene.date ?? ""} onChange={(v) => updateScene({ date: v })} />
-                <LabeledInput label="事件 / 场景" value={currentPhoto.scene.event ?? ""} onChange={(v) => updateScene({ event: v })} placeholder="如：家庭聚会 / 毕业" />
+                <LabeledInput
+                  label="拍摄时间 *"
+                  type="date"
+                  value={currentPhoto.timeTaken ?? ""}
+                  onChange={(v) => updatePhotoField('timeTaken', v)}
+                />
+                <label style={styles.fieldLabel}>
+                  <div style={styles.sectionLabel}>时间精度</div>
+                  <select
+                    value={currentPhoto.timePrecision}
+                    onChange={(e) => updatePhotoField('timePrecision', e.target.value as any)}
+                    style={styles.input}
+                  >
+                    {timePrecisionOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </label>
               </div>
 
-              <div style={styles.sectionLabel}>标签</div>
+              <div style={styles.sectionLabel}>拍摄地点 *</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                {places.map((place) => (
+                  <button
+                    key={place.id}
+                    style={{
+                      ...styles.chip,
+                      background: currentPhoto.placeId === place.id ? 'linear-gradient(135deg, rgba(245,217,184,0.6), rgba(239,230,221,0.6))' : '#fff',
+                      borderColor: currentPhoto.placeId === place.id ? 'rgba(139,115,85,0.3)' : '#E8E4DE',
+                    }}
+                    onClick={() => {
+                      updatePhotoField('placeId', place.id)
+                      updatePhotoField('placeName', place.name)
+                    }}
+                  >
+                    {place.name}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                <input
+                  value={newPlaceName}
+                  onChange={(e) => setNewPlaceName(e.target.value)}
+                  placeholder="添加新地点..."
+                  style={{ ...styles.input, flex: 1 }}
+                />
+                <button style={styles.primaryBtn} onClick={() => createPlace(newPlaceName)}>添加</button>
+              </div>
+
+              <LabeledTextArea
+                label="照片描述 *"
+                value={currentPhoto.caption ?? ""}
+                onChange={(v) => updatePhotoField('caption', v)}
+                placeholder="描述这张照片的内容、故事或情感..."
+              />
+
+              <div style={styles.sectionLabel}>标签（可选）</div>
               <div style={styles.chipRow}>
                 {sceneSuggestionTags.map((tag) => (
                   <button key={tag} style={currentPhoto.scene.tags.includes(tag) ? styles.chipActive : styles.chip} onClick={() => toggleTag(tag)}>
@@ -593,36 +831,56 @@ export default function NewPhotoFlow() {
                   </button>
                 ))}
               </div>
-
-              <LabeledTextArea
-                label="补充描述"
-                value={currentPhoto.scene.notes ?? ""}
-                onChange={(v) => updateScene({ notes: v })}
-                placeholder="写下这张照片的故事、氛围或细节。"
-              />
             </div>
           )}
 
-          {step === 4 && (
+          {/* Step 5: Review */}
+          {step === 5 && (
             <div style={styles.card}>
-              <div style={styles.cardHeader}>Step 4 · 确认并保存</div>
-              <p style={styles.cardHint}>查看每张照片的标记，确认无误后保存。</p>
+              <div style={styles.cardHeader}>Step 5 · 确认并保存</div>
+              <p style={styles.cardHint}>查看每张照片的5字段标注完成情况。</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {photos.map((p) => (
-                  <div key={p.id} style={styles.reviewItem}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <div style={styles.reviewThumb}>
-                        <img src={p.previewUrl} alt={p.fileName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                {photos.map((p) => {
+                  const missing: string[] = []
+                  if (!p.linkedQuestionId) missing.push('问题')
+                  if (!p.people.length) missing.push('人物')
+                  if (!p.timeTaken) missing.push('时间')
+                  if (!p.placeId) missing.push('地点')
+                  if (!p.caption?.trim()) missing.push('描述')
+                  const isComplete = missing.length === 0
+                  const percentage = ((5 - missing.length) / 5 * 100).toFixed(0)
+
+                  return (
+                    <div key={p.id} style={styles.reviewItem}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flex: 1 }}>
+                        <div style={styles.reviewThumb}>
+                          <img src={p.previewUrl} alt={p.fileName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            {p.fileName}
+                            <span style={{
+                              padding: '2px 8px',
+                              borderRadius: 12,
+                              fontSize: 11,
+                              background: isComplete ? 'rgba(34,197,94,0.1)' : 'rgba(234,179,8,0.1)',
+                              color: isComplete ? '#16a34a' : '#ca8a04',
+                            }}>
+                              {percentage}%
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>问题：{questions.find(q => q.id === p.linkedQuestionId)?.question_text?.slice(0, 20) || '未选择'}...</div>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>人物：{p.people.map((i) => i.name).join("，") || "未标记"}</div>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>时间：{p.timeTaken || "未填写"} | 地点：{p.placeName || "未选择"}</div>
+                          {!isComplete && (
+                            <div style={{ fontSize: 11, color: '#ca8a04', marginTop: 4 }}>缺少：{missing.join('、')}</div>
+                          )}
+                        </div>
                       </div>
-                      <div>
-                        <div style={{ fontWeight: 700 }}>{p.fileName}</div>
-                        <div style={{ fontSize: 12, opacity: 0.7 }}>人物：{p.people.map((i) => i.name).join("，") || "未标记"}</div>
-                        <div style={{ fontSize: 12, opacity: 0.7 }}>场景：{p.scene.event || p.scene.location || p.scene.date || "未填写"}</div>
-                      </div>
+                      <button style={styles.linkBtn} onClick={() => { setSelectedPhotoId(p.id); setStep(2) }}>修改</button>
                     </div>
-                    <button style={styles.linkBtn} onClick={() => { setSelectedPhotoId(p.id); setStep(2) }}>修改</button>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
               <button style={styles.primaryBtn} onClick={saveAll}>保存并返回</button>
             </div>
@@ -651,8 +909,19 @@ export default function NewPhotoFlow() {
                       )}
                       <div style={styles.previewBadge}>{status === "uploading" ? "UPLOADING" : "ANNOTATING"}</div>
                       <div style={styles.previewInfoBar}>
-                        <div style={{ fontWeight: 700, fontSize: 13 }}>{currentPhoto.fileName || '未命名照片'}</div>
-                        <div style={{ fontSize: 12, color: '#9fb6cc' }}>Step {step}/4 · 可继续标记人物与场景</div>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 13 }}>{currentPhoto.fileName || '未命名照片'}</div>
+                          <div style={{ fontSize: 12, color: '#9fb6cc' }}>Step {step}/5</div>
+                        </div>
+                        <div style={{
+                          padding: '4px 10px',
+                          borderRadius: 12,
+                          fontSize: 11,
+                          background: completionStatus.complete ? 'rgba(34,197,94,0.1)' : 'rgba(234,179,8,0.1)',
+                          color: completionStatus.complete ? '#16a34a' : '#ca8a04',
+                        }}>
+                          {completionStatus.complete ? '标注完成' : `缺少: ${completionStatus.missing.join('、')}`}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -683,11 +952,11 @@ export default function NewPhotoFlow() {
           <div style={styles.footerBar}>
             <div style={{ display: "flex", gap: 10 }}>
               <button style={styles.ghostBtn} disabled={step === 1} onClick={prevStep}>← 上一步</button>
-              <button style={styles.primaryBtn} disabled={!canContinue} onClick={step === 4 ? saveAll : nextStep}>
-                {step === 4 ? "保存" : "下一步"}
+              <button style={styles.primaryBtn} disabled={!canContinue} onClick={step === 5 ? saveAll : nextStep}>
+                {step === 5 ? "保存" : "下一步"}
               </button>
             </div>
-            <div style={{ fontSize: 12, color: "#94a3b8" }}>进度：Step {step}/4</div>
+            <div style={{ fontSize: 12, color: "#94a3b8" }}>进度：Step {step}/5</div>
           </div>
         </div>
       </div>
@@ -846,6 +1115,31 @@ const styles: Record<string, any> = {
     border: "1px solid rgba(0,0,0,0.06)",
     background: "#f1e9e0",
   },
+  required: {
+    fontSize: 11,
+    color: '#dc2626',
+    fontWeight: 400,
+    marginLeft: 6,
+  },
+  selectedBadge: {
+    padding: '10px 14px',
+    borderRadius: 10,
+    background: 'linear-gradient(135deg, rgba(245,217,184,0.4), rgba(239,230,221,0.4))',
+    border: '1px solid rgba(139,115,85,0.2)',
+    marginBottom: 12,
+    fontSize: 13,
+  },
+  questionItem: {
+    padding: '10px 14px',
+    borderRadius: 10,
+    border: '1px solid #E8E4DE',
+    background: '#fff',
+    textAlign: 'left',
+    cursor: 'pointer',
+    fontSize: 13,
+    lineHeight: 1.4,
+    transition: 'all 0.15s',
+  },
   error: {
     background: "rgba(220,38,38,0.08)",
     border: "1px solid rgba(220,38,38,0.15)",
@@ -936,9 +1230,9 @@ const styles: Record<string, any> = {
   chipGhost: {
     padding: "8px 12px",
     borderRadius: 999,
-    border: "1px dashed rgba(255,255,255,0.25)",
+    border: "1px dashed #ccc",
     background: "transparent",
-    color: "#e5ecf5",
+    color: "#6B6B6B",
     cursor: "pointer",
     fontSize: 12,
   },
@@ -1072,7 +1366,7 @@ const styles: Record<string, any> = {
   linkBtn: {
     background: "none",
     border: "none",
-    color: "#67e8f9",
+    color: "#8B7355",
     cursor: "pointer",
     fontSize: 12,
   },
@@ -1087,10 +1381,10 @@ const styles: Record<string, any> = {
     gap: 8,
     alignItems: "center",
     flexWrap: "wrap",
-    border: "1px solid rgba(255,255,255,0.06)",
+    border: "1px solid #E8E4DE",
     borderRadius: 10,
     padding: 10,
-    background: "rgba(255,255,255,0.02)",
+    background: "#FAF8F5",
   },
   smallBtn: {
     padding: "8px 10px",
@@ -1126,6 +1420,7 @@ const styles: Record<string, any> = {
     borderRadius: 10,
     overflow: "hidden",
     border: "1px solid #EEE",
+    flexShrink: 0,
   },
 }
 

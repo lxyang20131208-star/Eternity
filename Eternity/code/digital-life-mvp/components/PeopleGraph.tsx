@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 
 interface Person {
   id: string
@@ -36,6 +36,68 @@ interface PeopleGraphProps {
   onAddRelationship?: (personAId: string, personBId: string) => void
 }
 
+// 根据人物数量动态计算节点参数
+function calculateGraphParams(peopleCount: number) {
+  // 节点半径参数
+  const MAX_NODE_RADIUS = 45    // 人少时的最大半径
+  const MIN_NODE_RADIUS = 18    // 人多时的最小半径
+  const MAX_CENTER_RADIUS = 55  // 中心节点最大半径
+  const MIN_CENTER_RADIUS = 30  // 中心节点最小半径
+
+  // 根据人数计算半径（分段线性）
+  let nodeRadius: number
+  let centerRadius: number
+  let repulsionDistance: number
+  let spreadRadius: number
+  let fontSize: number
+  let centerFontSize: number
+
+  if (peopleCount <= 5) {
+    // 5人以下：最大尺寸
+    nodeRadius = MAX_NODE_RADIUS
+    centerRadius = MAX_CENTER_RADIUS
+    repulsionDistance = 120
+    spreadRadius = 0.3  // 画布尺寸的30%
+    fontSize = 16
+    centerFontSize = 22
+  } else if (peopleCount <= 15) {
+    // 5-15人：线性递减
+    const ratio = (peopleCount - 5) / 10
+    nodeRadius = MAX_NODE_RADIUS - ratio * (MAX_NODE_RADIUS - 30)
+    centerRadius = MAX_CENTER_RADIUS - ratio * (MAX_CENTER_RADIUS - 40)
+    repulsionDistance = 120 - ratio * 30
+    spreadRadius = 0.3 + ratio * 0.1  // 30%-40%
+    fontSize = 16 - ratio * 4
+    centerFontSize = 22 - ratio * 4
+  } else if (peopleCount <= 30) {
+    // 15-30人：继续递减
+    const ratio = (peopleCount - 15) / 15
+    nodeRadius = 30 - ratio * (30 - MIN_NODE_RADIUS)
+    centerRadius = 40 - ratio * (40 - MIN_CENTER_RADIUS)
+    repulsionDistance = 90 - ratio * 30
+    spreadRadius = 0.4 + ratio * 0.1  // 40%-50%
+    fontSize = 12 - ratio * 2
+    centerFontSize = 18 - ratio * 4
+  } else {
+    // 30人以上：最小尺寸
+    nodeRadius = MIN_NODE_RADIUS
+    centerRadius = MIN_CENTER_RADIUS
+    repulsionDistance = 60
+    spreadRadius = 0.5  // 画布尺寸的50%
+    fontSize = 10
+    centerFontSize = 14
+  }
+
+  return {
+    nodeRadius: Math.round(nodeRadius),
+    centerRadius: Math.round(centerRadius),
+    repulsionDistance: Math.round(repulsionDistance),
+    spreadRadius,
+    fontSize: Math.round(fontSize),
+    centerFontSize: Math.round(centerFontSize),
+  }
+}
+
 export default function PeopleGraph({
   people,
   relationships,
@@ -47,10 +109,15 @@ export default function PeopleGraph({
   const [selectedNodes, setSelectedNodes] = useState<string[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [draggedNode, setDraggedNode] = useState<string | null>(null)
-  const animationRef = useRef<number>()
+  const animationRef = useRef<number>(0)
+  // 用于追踪是否真正发生了拖拽（鼠标移动过），而不只是点击
+  const hasDraggedRef = useRef(false)
+  const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null)
 
-  const NODE_RADIUS = 40
-  const CENTER_RADIUS = 60
+  // 根据人物数量动态计算参数
+  const graphParams = useMemo(() => calculateGraphParams(people.length), [people.length])
+
+  const { nodeRadius: NODE_RADIUS, centerRadius: CENTER_RADIUS, repulsionDistance, spreadRadius, fontSize, centerFontSize } = graphParams
 
   // 初始化节点位置（以"我"为中心的散射布局）
   useEffect(() => {
@@ -77,8 +144,8 @@ export default function PeopleGraph({
       isCenter: true,
     }
 
-    // 计算散射半径和角度
-    const radius = Math.min(canvas.width, canvas.height) * 0.3
+    // 计算散射半径和角度（使用动态的 spreadRadius）
+    const radius = Math.min(canvas.width, canvas.height) * spreadRadius
     const angleStep = (Math.PI * 2) / people.length
 
     const personNodes: Node[] = people.map((person, index) => {
@@ -94,7 +161,7 @@ export default function PeopleGraph({
     })
 
     setNodes([centerNode, ...personNodes])
-  }, [people])
+  }, [people, spreadRadius])
 
   // 物理模拟（简单的力导向布局）
   useEffect(() => {
@@ -114,26 +181,37 @@ export default function PeopleGraph({
             const dx = centerNode.x - node.x
             const dy = centerNode.y - node.y
             const distance = Math.sqrt(dx * dx + dy * dy)
-            const targetDistance = Math.min(canvasRef.current!.width, canvasRef.current!.height) * 0.3
+            // 使用动态的目标距离
+            const targetDistance = Math.min(canvasRef.current!.width, canvasRef.current!.height) * spreadRadius
             const force = (distance - targetDistance) * 0.01
             fx += (dx / distance) * force
             fy += (dy / distance) * force
           }
 
-          // 2. 节点排斥力
+          // 2. 节点排斥力（使用动态的排斥距离）
+          // 最小安全距离 = 两个节点半径之和 + 间隙
+          const minSafeDistance = NODE_RADIUS * 2 + 20
           currentNodes.forEach((otherNode, j) => {
             if (i === j) return
             const dx = node.x - otherNode.x
             const dy = node.y - otherNode.y
             const distance = Math.sqrt(dx * dx + dy * dy)
-            if (distance < 150 && distance > 0) {
-              const force = 100 / (distance * distance)
-              fx += (dx / distance) * force
-              fy += (dy / distance) * force
+            // 使用动态的排斥距离，确保节点不重叠
+            if (distance < repulsionDistance && distance > 0) {
+              // 距离越近，排斥力越强
+              const forceMagnitude = Math.pow((repulsionDistance - distance) / repulsionDistance, 2) * 5
+              fx += (dx / distance) * forceMagnitude
+              fy += (dy / distance) * forceMagnitude
+            }
+            // 如果距离小于最小安全距离，施加更强的排斥力
+            if (distance < minSafeDistance && distance > 0) {
+              const emergencyForce = (minSafeDistance - distance) * 0.5
+              fx += (dx / distance) * emergencyForce
+              fy += (dy / distance) * emergencyForce
             }
           })
 
-          // 3. 关系连线吸引力
+          // 3. 关系连线吸引力（根据节点大小调整目标距离）
           relationships.forEach((rel) => {
             const otherNodeId =
               rel.person_a_id === node.id ? rel.person_b_id : rel.person_b_id === node.id ? rel.person_a_id : null
@@ -145,8 +223,9 @@ export default function PeopleGraph({
             const dx = otherNode.x - node.x
             const dy = otherNode.y - node.y
             const distance = Math.sqrt(dx * dx + dy * dy)
-            const targetDistance = 150
-            const force = (distance - targetDistance) * 0.02
+            // 关系线的理想距离也根据节点大小调整
+            const relationTargetDistance = NODE_RADIUS * 3 + 30
+            const force = (distance - relationTargetDistance) * 0.02
             fx += (dx / distance) * force
             fy += (dy / distance) * force
           })
@@ -175,7 +254,7 @@ export default function PeopleGraph({
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [nodes.length, relationships, draggedNode])
+  }, [nodes.length, relationships, draggedNode, NODE_RADIUS, spreadRadius, repulsionDistance])
 
   // 绘制画布
   useEffect(() => {
@@ -268,32 +347,36 @@ export default function PeopleGraph({
       ctx.lineWidth = 3
       ctx.stroke()
 
-      // 绘制头像或首字母
+      // 绘制头像或首字母（使用动态字体大小）
       if (node.person.avatar_url) {
         // TODO: 绘制头像图片
         // 这里需要预加载图片
       } else {
         ctx.fillStyle = '#ffffff'
-        ctx.font = `bold ${node.isCenter ? '24px' : '18px'} sans-serif`
+        const initialFontSize = node.isCenter ? centerFontSize : Math.max(fontSize, 12)
+        ctx.font = `bold ${initialFontSize}px sans-serif`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         ctx.fillText(node.person.name.charAt(0), node.x, node.y)
       }
 
-      // 绘制姓名
+      // 绘制姓名（使用动态字体大小）
       ctx.fillStyle = '#1f2937'
-      ctx.font = `${node.isCenter ? '16px' : '14px'} sans-serif`
+      const nameFontSize = node.isCenter ? Math.max(fontSize, 14) : Math.max(fontSize - 2, 10)
+      ctx.font = `${nameFontSize}px sans-serif`
       ctx.textAlign = 'center'
-      ctx.fillText(node.person.name, node.x, node.y + radius + 20)
+      // 根据节点大小调整名字位置
+      const nameOffset = radius + Math.max(15, NODE_RADIUS * 0.4)
+      ctx.fillText(node.person.name, node.x, node.y + nameOffset)
 
-      // 绘制提到次数（如果有）
-      if (!node.isCenter && node.person.importance_score && node.person.importance_score > 0) {
+      // 绘制提到次数（如果有，且节点足够大）
+      if (!node.isCenter && node.person.importance_score && node.person.importance_score > 0 && NODE_RADIUS >= 25) {
         ctx.fillStyle = '#6b7280'
-        ctx.font = '10px sans-serif'
-        ctx.fillText(`${node.person.importance_score}次`, node.x, node.y + radius + 35)
+        ctx.font = `${Math.max(fontSize - 4, 9)}px sans-serif`
+        ctx.fillText(`${node.person.importance_score}次`, node.x, node.y + nameOffset + 12)
       }
     })
-  }, [nodes, relationships, selectedNodes])
+  }, [nodes, relationships, selectedNodes, NODE_RADIUS, CENTER_RADIUS, fontSize, centerFontSize])
 
   // 鼠标事件处理
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -301,8 +384,15 @@ export default function PeopleGraph({
     if (!canvas) return
 
     const rect = canvas.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    // 将屏幕坐标转换为canvas内部坐标
+    const scaleX = canvas.width / rect.width
+    const scaleY = canvas.height / rect.height
+    const x = (e.clientX - rect.left) * scaleX
+    const y = (e.clientY - rect.top) * scaleY
+
+    // 记录鼠标按下位置，用于判断是否真正拖拽
+    mouseDownPosRef.current = { x, y }
+    hasDraggedRef.current = false
 
     const clickedNode = nodes.find((node) => {
       const radius = node.isCenter ? CENTER_RADIUS : NODE_RADIUS
@@ -338,8 +428,20 @@ export default function PeopleGraph({
     if (!canvas) return
 
     const rect = canvas.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    // 将屏幕坐标转换为canvas内部坐标
+    const scaleX = canvas.width / rect.width
+    const scaleY = canvas.height / rect.height
+    const x = (e.clientX - rect.left) * scaleX
+    const y = (e.clientY - rect.top) * scaleY
+
+    // 检测是否真正发生了拖拽（移动超过5像素，按缩放比例计算）
+    if (mouseDownPosRef.current) {
+      const dx = x - mouseDownPosRef.current.x
+      const dy = y - mouseDownPosRef.current.y
+      if (Math.sqrt(dx * dx + dy * dy) > 5 * Math.max(scaleX, scaleY)) {
+        hasDraggedRef.current = true
+      }
+    }
 
     setNodes((currentNodes) =>
       currentNodes.map((node) =>
@@ -351,25 +453,47 @@ export default function PeopleGraph({
   const handleMouseUp = () => {
     setIsDragging(false)
     setDraggedNode(null)
+    // 保留 hasDraggedRef，让 handleClick 可以检查
   }
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (e.shiftKey || isDragging) return
+    // 使用 ref 检查是否发生了真正的拖拽，避免 React 状态更新的异步问题
+    if (e.shiftKey || hasDraggedRef.current) {
+      // 重置拖拽标记
+      hasDraggedRef.current = false
+      mouseDownPosRef.current = null
+      return
+    }
+
+    // 重置标记
+    hasDraggedRef.current = false
+    mouseDownPosRef.current = null
 
     const canvas = canvasRef.current
     if (!canvas) return
 
     const rect = canvas.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    // 将屏幕坐标转换为canvas内部坐标
+    const scaleX = canvas.width / rect.width
+    const scaleY = canvas.height / rect.height
+    const x = (e.clientX - rect.left) * scaleX
+    const y = (e.clientY - rect.top) * scaleY
+
+    // 调试：打印点击坐标和节点信息
+    console.log('[PeopleGraph] Click at canvas coords:', { x, y })
+    console.log('[PeopleGraph] Nodes:', nodes.map(n => ({ id: n.id, x: n.x, y: n.y, name: n.person.name })))
 
     const clickedNode = nodes.find((node) => {
       const radius = node.isCenter ? CENTER_RADIUS : NODE_RADIUS
       const distance = Math.sqrt((x - node.x) ** 2 + (y - node.y) ** 2)
+      console.log('[PeopleGraph] Check node:', node.person.name, 'distance:', distance, 'radius:', radius)
       return distance <= radius
     })
 
+    console.log('[PeopleGraph] Clicked node:', clickedNode?.person?.name || 'none')
+
     if (clickedNode && !clickedNode.isCenter) {
+      console.log('[PeopleGraph] Calling onNodeClick for:', clickedNode.person.name)
       onNodeClick(clickedNode.person)
     }
   }
@@ -394,6 +518,9 @@ export default function PeopleGraph({
           按住 Shift + 点击两个节点可创建关系
         </p>
         <p className="text-xs text-gray-500 dark:text-gray-400">拖拽节点可调整位置</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 border-t border-gray-200 dark:border-gray-600 pt-2">
+          人数: {people.length} · 节点大小: {NODE_RADIUS}px
+        </p>
       </div>
 
       {/* 选中节点提示 */}

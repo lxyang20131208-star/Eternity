@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
 import Link from 'next/link'
+import UnifiedNav from '@/app/components/UnifiedNav'
 import {
   generateBiographyOutline,
   getOutlineJobStatus,
@@ -20,6 +21,7 @@ import {
   type AuthorStyle,
 } from '@/lib/biographyOutlineApi'
 import { FreeQuestionSection } from '@/app/components/free-questions'
+import { CompletionMilestones } from '@/app/components/CompletionMilestones'
 
 function uuid() {
   return crypto.randomUUID()
@@ -192,16 +194,8 @@ function AudioPlayer({ audioObjectKey }: { audioObjectKey: string }) {
     <audio
       controls
       src={audioUrl}
-      style={{
-        width: '100%',
-        height: 36,
-        background: 'rgba(227,214,198,0.06)',
-        borderRadius: 8,
-        accentColor: '#B89B72',
-        color: '#3B2F23',
-        outline: 'none',
-        WebkitAppearance: 'none',
-      }}
+      className="custom-audio"
+      style={{ width: '100%' }}
     />
   )
 }
@@ -257,8 +251,12 @@ function MainPageContent() {
     id: string
     text: string
     chapter: string | null
-    isCustom?: boolean
+    scope: 'global' | 'user' | 'trial'  // 问题类型：global=核心问题, user=用户自定义, trial=试用问题
+    isCustom?: boolean  // 向后兼容：true 表示用户自定义问题
   }
+
+  // 核心问题数量常量（精确100个）
+  const CORE_QUESTION_COUNT = 100
 
   type AnswerSession = {
     id: string
@@ -366,15 +364,49 @@ function MainPageContent() {
   const [showPremiumModal, setShowPremiumModal] = useState(false)
   const [isPremium, setIsPremium] = useState(false)
   const [membershipTier, setMembershipTier] = useState<'plus' | 'pro' | null>(null)
+  const [isProcessing, setIsProcessing] = useState(false)
   const [paymentCount, setPaymentCount] = useState(1) // Number of payments for Plus users (1-6)
-  const DEV_FORCE_PREMIUM = true // temp override for this account/session
+  const DEV_FORCE_PREMIUM = false // temp override for this account/session
 
+  // Chapter lock modal state
   // Chapter lock modal state
   const [chapterLockModal, setChapterLockModal] = useState<{
     show: boolean
     chapterName: string
     requiredPayments: number
   } | null>(null)
+
+  async function handlePurchase(plan: 'plus' | 'pro') {
+    if (!userId) {
+      router.push('/signin?source=buy')
+      return
+    }
+
+    setIsProcessing(true)
+    try {
+      const resp = await fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan }),
+      })
+
+      const data = await resp.json()
+      if (!resp.ok) {
+        throw new Error(data?.error?.message || data?.error || '创建支付会话失败')
+      }
+
+      if (data.url) {
+        window.location.href = data.url
+      } else {
+        throw new Error('未能获取结账链接')
+      }
+    } catch (err: any) {
+      console.error('Purchase error:', err)
+      showToast(err?.message || '支付失败', 'error')
+    } finally {
+      setIsProcessing(false)
+    }
+  }
   
   // Biography Outline states
   const [showOutlineModal, setShowOutlineModal] = useState(false)
@@ -391,6 +423,7 @@ function MainPageContent() {
   const [showOutlineHistory, setShowOutlineHistory] = useState(false)
   const [displayProgress, setDisplayProgress] = useState(0)
   const [confirmDeleteOutline, setConfirmDeleteOutline] = useState<string | null>(null)
+  const [loadingAnswers, setLoadingAnswers] = useState(true)
 
   function showToast(text: string, type: 'success' | 'error' = 'success') {
     setToast({ text, type })
@@ -465,6 +498,9 @@ function MainPageContent() {
       const existingId = list?.[0]?.id
       if (existingId) {
         setProjectId(existingId)
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('currentProjectId', existingId)
+        }
         return
       }
 
@@ -478,6 +514,9 @@ function MainPageContent() {
       if (!created) throw new Error('Failed to create project')
 
       setProjectId(created.id)
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('currentProjectId', created.id)
+      }
     } catch (e: any) {
       setError(e?.message ?? String(e))
     } finally {
@@ -563,7 +602,7 @@ function MainPageContent() {
       try {
         if (!userId) return
 
-        // 读取本地自定义问题 ID，区分展示
+        // 读取本地自定义问题 ID，区分展示（向后兼容）
         let customIds: Set<string> = new Set()
         if (typeof window !== 'undefined') {
           const stored = localStorage.getItem('customQuestionIds')
@@ -576,9 +615,13 @@ function MainPageContent() {
           }
         }
 
+        // 查询问题，包含 scope 字段
+        // RLS 策略已经过滤了：只返回 global 和当前用户的 user 问题
+        // trial 问题虽然技术上可以通过 RLS 访问，但我们在前端也做过滤以确保安全
         const { data, error } = await supabase
           .from('questions')
-          .select('id, text, chapter')
+          .select('id, text, chapter, scope')
+          .in('scope', ['global', 'user'])  // 明确排除 trial 问题
           .order('id', { ascending: true })
 
         if (error) throw error
@@ -587,7 +630,8 @@ function MainPageContent() {
           id: String(q.id),
           text: q.text,
           chapter: q.chapter ?? null,
-          isCustom: customIds.has(String(q.id)),
+          scope: q.scope || 'global',  // 默认为 global（兼容旧数据）
+          isCustom: q.scope === 'user' || customIds.has(String(q.id)),  // 通过 scope 或 localStorage 判断
         }))
 
         setQuestions(normalized)
@@ -608,7 +652,8 @@ function MainPageContent() {
     async function loadAnswered() {
       try {
         if (!projectId) return
-
+        
+        setLoadingAnswers(true)
         const { data, error } = await supabase
           .from('answer_sessions')
           .select('question_id')
@@ -620,6 +665,8 @@ function MainPageContent() {
         setAnsweredSet(s)
       } catch (e: any) {
         setError(e?.message ?? String(e))
+      } finally {
+        setLoadingAnswers(false)
       }
     }
 
@@ -794,18 +841,37 @@ function MainPageContent() {
       throw new Error('Not logged in, cannot save custom question')
     }
 
+    // 验证当前 Supabase 会话，确保 RLS 能正确获取 auth.uid()
+    const { data: { user: currentUser }, error: authError } = await supabase.auth.getUser()
+    if (authError || !currentUser) {
+      console.error('Authentication check failed:', authError?.message || 'No user session')
+      throw new Error('Authentication expired, please refresh the page and try again')
+    }
+
+    // 使用当前认证用户的 ID，确保与 RLS 策略中的 auth.uid() 匹配
+    const authenticatedUserId = currentUser.id
+
+    // 必须设置 scope='user' 和 owner_user_id 才能满足 RLS 策略
+    // 注意：数据库中 created_by 字段是 UUID 类型（历史迁移问题），不要传入字符串
     const { error } = await supabase
       .from('questions')
       .insert({
         id: questionId,
         text,
         chapter,
-        created_by: userId,
+        scope: 'user',                      // 标记为用户自定义问题
+        owner_user_id: authenticatedUserId, // 使用认证用户 ID，确保 RLS 检查通过
       })
 
     if (error) {
-      console.error('Failed to save custom question:', error)
-      throw error
+      // 详细记录错误信息以便调试
+      console.error('Failed to save custom question:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      })
+      throw new Error(error.message || 'Failed to save question to database')
     }
 
     // 记录自定义问题 ID 以便区分
@@ -823,7 +889,7 @@ function MainPageContent() {
     }
 
     // 添加到本地 questions 列表（标记 isCustom）
-    setQuestions(prev => [...prev, { id: questionId, text, chapter, isCustom: true }])
+    setQuestions(prev => [...prev, { id: questionId, text, chapter, scope: 'user', isCustom: true }])
     setCurrentQuestionId(questionId)
 
     return questionId
@@ -857,8 +923,12 @@ function MainPageContent() {
       
       showToast('Custom question deleted', 'success')
     } catch (e: any) {
-      console.error('Failed to delete custom question:', e)
-      showToast('Delete failed, please try again', 'error')
+      console.error('Failed to delete custom question:', {
+        message: e?.message,
+        code: e?.code,
+        details: e?.details,
+      })
+      showToast(e?.message || 'Delete failed, please try again', 'error')
       throw e
     }
   }
@@ -867,15 +937,18 @@ function MainPageContent() {
     setError(null)
     setAudioUrl(null)
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    const recorder = new MediaRecorder(stream)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
 
-    chunksRef.current = []
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data)
-    }
+      chunksRef.current = []
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data)
+      }
 
-    recorder.onstop = async () => {
+      recorder.onstop = async () => {
+        // 停止所有音轨，释放麦克风
+        stream.getTracks().forEach(track => track.stop())
       try {
         if (!userId || !projectId) {
           setError('User or project not ready')
@@ -967,6 +1040,10 @@ function MainPageContent() {
     mediaRecorderRef.current = recorder
     recorder.start()
     setStatus('recording')
+    } catch (e: any) {
+      setError(e?.message || 'Failed to access microphone')
+      setStatus('error')
+    }
   }
 
   function stopRecording() {
@@ -1301,9 +1378,19 @@ function MainPageContent() {
     return () => clearInterval(animateInterval)
   }, [generatingOutline, currentJob, currentJob?.progress_percent])
 
+  // 计算核心问题和自定义问题的数量
+  const coreQuestions = questions.filter(q => q.scope === 'global')
+  const customQuestions = questions.filter(q => q.scope === 'user')
+  const coreQuestionCount = coreQuestions.length
+  const customQuestionCount = customQuestions.length
+
+  // 计算已回答的核心问题数量（用于进度计算）
+  const answeredCoreCount = coreQuestions.filter(q => answeredSet.has(q.id)).length
+  const answeredCustomCount = customQuestions.filter(q => answeredSet.has(q.id)).length
+
   const progressCount = answeredSet.size
   const totalCount = questions.length
-  const outlineUnlocked = progressCount >= MIN_ANSWERS_FOR_OUTLINE
+  const outlineUnlocked = answeredCoreCount >= MIN_ANSWERS_FOR_OUTLINE  // 只有核心问题计入解锁条件
 
   // Find current question
   const currentQuestion = questions.find((q) => q.id === currentQuestionId)
@@ -1465,428 +1552,7 @@ function MainPageContent() {
         maxWidth: 1400,
         margin: '0 auto',
       }}>
-        {/* Header */}
-        <div style={{
-          marginBottom: 16,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '10px 16px',
-          background: 'white',
-          borderBottom: '1px solid #EEEAE4',
-          boxShadow: 'none',
-          borderRadius: 0,
-          gap: 12,
-          minHeight: 'auto'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-            <img 
-              src="/logo.png" 
-              alt="EverArchive Logo" 
-              style={{ 
-                width: 42, 
-                height: 42,
-                objectFit: 'contain',
-                background: 'transparent'
-              }} 
-            />
-            <div style={{ minWidth: 0 }}>
-              <h1 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#222', letterSpacing: '0.5px' }}>
-                <span style={{ color: '#222' }}>EverArchive</span>
-              </h1>
-              <p style={{ margin: '0px 0 0', fontSize: 8, color: '#5A4F43', letterSpacing: '0.3px' }}>
-                <span style={{ color: '#5A4F43' }}>Where Memories Outlast Time</span>
-              </p>
-            </div>
-          </div>
-          {isLoggedIn && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', minWidth: 0 }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '4px 8px',
-                height: 28,
-                background: 'white',
-                border: '1px solid var(--border)',
-                borderRadius: 6,
-                fontSize: 8,
-                color: '#8B7355',
-                minWidth: 0,
-              }}>
-                <span className="status-dot active" style={{ width: 4, height: 4 }} />
-                <span style={{ color: '#8B7355', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100px', fontSize: 8 }}>{userEmail}</span>
-              </div>
-
-              {/* Membership Tier Badge */}
-              {membershipTier && (
-                <div style={{
-                  display: 'flex',
-                    alignItems: 'center',
-                    gap: 3,
-                    padding: '4px 8px',
-                    height: 28,
-                  background: membershipTier === 'pro'
-                    ? 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)'
-                    : 'linear-gradient(135deg, #8B7355 0%, #A89070 100%)',
-                  borderRadius: 6,
-                  fontSize: 8,
-                  fontWeight: 700,
-                  color: membershipTier === 'pro' ? '#1a1a2e' : '#fff',
-                  letterSpacing: '0.5px',
-                  boxShadow: membershipTier === 'pro'
-                    ? '0 2px 8px rgba(255, 215, 0, 0.3)'
-                    : '0 2px 6px rgba(139, 115, 85, 0.2)',
-                  flexShrink: 0,
-                }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, lineHeight: 1, transform: 'translateY(-2px)' }}>{membershipTier === 'pro' ? '★' : '◆'}</span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', lineHeight: 1, height: '100%' , justifyContent: 'center' }}>{membershipTier === 'pro' ? 'PRO' : 'PLUS'}</span>
-                </div>
-              )}
-
-              {/* Primary Action removed: Today's button hidden per request */}
-              
-              {/* Navigation Group */}
-              <div style={{
-                display: 'flex',
-                gap: 2,
-                padding: '2px',
-                background: 'rgba(255, 255, 255, 0.02)',
-                borderRadius: 3,
-                border: '1px solid rgba(255, 255, 255, 0.06)',
-              }}>
-                {/* PHOTOS - unlocks at 10 */}
-                {isFeatureUnlocked('photos', answeredSet.size) ? (
-                  <Link
-                    href="/photos/new"
-                    className="cyber-btn"
-                    style={{
-                      padding: '5px 7px',
-                      fontSize: 8,
-                      borderRadius: 2,
-                      textDecoration: 'none',
-                      border: '1px solid var(--border)',
-                      whiteSpace: 'nowrap',
-                    }}
-                    title="Photos"
-                  >
-                    ◇ PHOTOS
-                  </Link>
-                ) : (
-                  <button
-                    onClick={() => showLockedFeature('Photos', UNLOCK_THRESHOLDS.photos)}
-                    className="cyber-btn"
-                    style={{
-                      padding: '5px 7px',
-                      fontSize: 8,
-                      borderRadius: 2,
-                      background: 'var(--card)',
-                      color: '#999',
-                      border: '1px solid var(--border)',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      opacity: 0.6,
-                    }}
-                    title={`Unlocks at ${UNLOCK_THRESHOLDS.photos} questions`}
-                  >
-                    ◇ PHOTOS 🔒
-                  </button>
-                )}
-
-                {/* TREE - unlocks at 20 */}
-                {isFeatureUnlocked('tree', answeredSet.size) ? (
-                  <Link
-                    href="/family"
-                    className="cyber-btn"
-                    style={{
-                      padding: '5px 7px',
-                      fontSize: 8,
-                      borderRadius: 2,
-                      textDecoration: 'none',
-                      background: 'var(--card)',
-                      color: '#5A4F43',
-                      border: '1px solid var(--border)',
-                      whiteSpace: 'nowrap',
-                    }}
-                    title="Tree"
-                  >
-                    ◇ TREE
-                  </Link>
-                ) : (
-                  <button
-                    onClick={() => showLockedFeature('Tree', UNLOCK_THRESHOLDS.tree)}
-                    className="cyber-btn"
-                    style={{
-                      padding: '5px 7px',
-                      fontSize: 8,
-                      borderRadius: 2,
-                      background: 'var(--card)',
-                      color: '#999',
-                      border: '1px solid var(--border)',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      opacity: 0.6,
-                    }}
-                    title={`Unlocks at ${UNLOCK_THRESHOLDS.tree} questions`}
-                  >
-                    ◇ TREE 🔒
-                  </button>
-                )}
-
-                {/* OUTLINE - unlocks at 30 */}
-                {isFeatureUnlocked('outline', answeredSet.size) ? (
-                  <button
-                    onClick={() => window.location.href = '/outline-annotate'}
-                    className="cyber-btn"
-                    style={{
-                      padding: '5px 7px',
-                      fontSize: 8,
-                      borderRadius: 2,
-                      background: 'var(--card)',
-                      color: '#5A4F43',
-                      border: '1px solid var(--border)',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                    }}
-                    title="Outline"
-                  >
-                    ◇ OUTLINE
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => showLockedFeature('Outline', UNLOCK_THRESHOLDS.outline)}
-                    className="cyber-btn"
-                    style={{
-                      padding: '5px 7px',
-                      fontSize: 8,
-                      borderRadius: 2,
-                      background: 'var(--card)',
-                      color: '#999',
-                      border: '1px solid var(--border)',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      opacity: 0.6,
-                    }}
-                    title={`Unlocks at ${UNLOCK_THRESHOLDS.outline} questions`}
-                  >
-                    ◇ OUTLINE 🔒
-                  </button>
-                )}
-
-                {/* PLACES - unlocks at 40 */}
-                {isFeatureUnlocked('places', answeredSet.size) ? (
-                  <Link
-                    href="/places"
-                    className="cyber-btn"
-                    style={{
-                      padding: '5px 7px',
-                      fontSize: 8,
-                      borderRadius: 2,
-                      textDecoration: 'none',
-                      background: 'var(--card)',
-                      color: '#5A4F43',
-                      border: '1px solid var(--border)',
-                      whiteSpace: 'nowrap',
-                    }}
-                    title="Places"
-                  >
-                    ◇ PLACES
-                  </Link>
-                ) : (
-                  <button
-                    onClick={() => showLockedFeature('Places', UNLOCK_THRESHOLDS.places)}
-                    className="cyber-btn"
-                    style={{
-                      padding: '5px 7px',
-                      fontSize: 8,
-                      borderRadius: 2,
-                      background: 'var(--card)',
-                      color: '#999',
-                      border: '1px solid var(--border)',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      opacity: 0.6,
-                    }}
-                    title={`Unlocks at ${UNLOCK_THRESHOLDS.places} questions`}
-                  >
-                    ◇ PLACES 🔒
-                  </button>
-                )}
-
-                {/* TIMELINE - unlocks at 50 */}
-                {isFeatureUnlocked('timeline', answeredSet.size) ? (
-                  <Link
-                    href="/timeline"
-                    className="cyber-btn"
-                    style={{
-                      padding: '5px 7px',
-                      fontSize: 8,
-                      borderRadius: 2,
-                      textDecoration: 'none',
-                      background: 'var(--card)',
-                      color: '#5A4F43',
-                      border: '1px solid var(--border)',
-                      whiteSpace: 'nowrap',
-                    }}
-                    title="Timeline"
-                  >
-                    ◇ TIMELINE
-                  </Link>
-                ) : (
-                  <button
-                    onClick={() => showLockedFeature('Timeline', UNLOCK_THRESHOLDS.timeline)}
-                    className="cyber-btn"
-                    style={{
-                      padding: '5px 7px',
-                      fontSize: 8,
-                      borderRadius: 2,
-                      background: 'var(--card)',
-                      color: '#999',
-                      border: '1px solid var(--border)',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      opacity: 0.6,
-                    }}
-                    title={`Unlocks at ${UNLOCK_THRESHOLDS.timeline} questions`}
-                  >
-                    ◇ TIMELINE 🔒
-                  </button>
-                )}
-
-                {/* EXPORT - unlocks at 60 */}
-                {isFeatureUnlocked('export', answeredSet.size) ? (
-                  <button
-                    onClick={() => window.location.href = '/export'}
-                    className="cyber-btn"
-                    style={{
-                      padding: '5px 7px',
-                      fontSize: 8,
-                      borderRadius: 2,
-                      background: 'var(--card)',
-                      color: '#5A4F43',
-                      border: '1px solid var(--border)',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                    }}
-                    title="Export"
-                  >
-                    ◇ EXPORT
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => showLockedFeature('Export', UNLOCK_THRESHOLDS.export)}
-                    className="cyber-btn"
-                    style={{
-                      padding: '5px 7px',
-                      fontSize: 8,
-                      borderRadius: 2,
-                      background: 'var(--card)',
-                      color: '#999',
-                      border: '1px solid var(--border)',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      opacity: 0.6,
-                    }}
-                    title={`Unlocks at ${UNLOCK_THRESHOLDS.export} questions`}
-                  >
-                    ◇ EXPORT 🔒
-                  </button>
-                )}
-
-                {/* COLLAB - unlocks at 90 */}
-                {isFeatureUnlocked('collab', answeredSet.size) ? (
-                  <button
-                    onClick={() => setShowCollaboratorModal(true)}
-                    className="cyber-btn"
-                    style={{
-                      padding: '5px 7px',
-                      fontSize: 8,
-                      borderRadius: 2,
-                      background: 'var(--card)',
-                      color: '#5A4F43',
-                      border: '1px solid var(--border)',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                    }}
-                    title="Collab"
-                  >
-                    ◇ COLLAB
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => showLockedFeature('Collab', UNLOCK_THRESHOLDS.collab)}
-                    className="cyber-btn"
-                    style={{
-                      padding: '5px 7px',
-                      fontSize: 8,
-                      borderRadius: 2,
-                      background: 'var(--card)',
-                      color: '#999',
-                      border: '1px solid var(--border)',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      opacity: 0.6,
-                    }}
-                    title={`Unlocks at ${UNLOCK_THRESHOLDS.collab} questions`}
-                  >
-                    ◇ COLLAB 🔒
-                  </button>
-                )}
-
-                {/* MAP - always accessible */}
-                <Link
-                  href="/progress"
-                  className="cyber-btn"
-                  style={{
-                    padding: '5px 7px',
-                    fontSize: 8,
-                    borderRadius: 2,
-                    textDecoration: 'none',
-                    border: '1px solid var(--border)',
-                    whiteSpace: 'nowrap',
-                  }}
-                  title="Map"
-                >
-                  ◇ MAP
-                </Link>
-
-                <button
-                  onClick={() => setShowPremiumModal(true)}
-                  className="cyber-btn"
-                  style={{
-                    padding: '5px 7px',
-                    fontSize: 8,
-                    borderRadius: 2,
-                    background: 'var(--card)',
-                    color: '#5A4F43',
-                    border: '1px solid var(--border)',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    whiteSpace: 'nowrap',
-                  }}
-                  title="PRO"
-                >
-                  ✨ PRO
-                </button>
-              </div>
-              
-              <button
-                onClick={signOut}
-                className="cyber-btn cyber-btn-danger"
-                style={{
-                  padding: '5px 10px',
-                  fontSize: 8,
-                  borderRadius: 2,
-                  transition: 'all 0.2s',
-                  whiteSpace: 'nowrap',
-                  flexShrink: 0,
-                }}
-              >
-                SIGN OUT
-              </button>
-            </div>
-          )}
-        </div>
+        <UnifiedNav onProClick={() => setShowPremiumModal(true)} />
 
         {/* Main Content */}
         {!isLoggedIn ? (
@@ -1975,16 +1641,6 @@ function MainPageContent() {
                   position: 'relative',
                   overflow: 'hidden',
                 }}>
-                  {/* Top accent line */}
-                  <div style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    height: '2px',
-                    background: 'linear-gradient(90deg, transparent, #8B7355, transparent)',
-                  }} />
-
                   <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 16 }}>
                     <div style={{
                       padding: '6px 12px',
@@ -2022,12 +1678,12 @@ function MainPageContent() {
                   {followUpQuestions.length > 0 && (
                     <div style={{
                       padding: '12px',
-                      background: 'rgba(251, 191, 36, 0.08)',
-                      border: '1px solid rgba(251, 191, 36, 0.2)',
+                      background: 'rgba(184, 155, 114, 0.08)',
+                      border: '1px solid rgba(184, 155, 114, 0.2)',
                       borderRadius: 8,
                       marginBottom: 16,
                     }}>
-                      <div style={{ fontSize: 11, color: '#fbbf24', fontWeight: 600, marginBottom: 6, letterSpacing: '0.5px' }}>
+                      <div style={{ fontSize: 11, color: '#8B7355', fontWeight: 600, marginBottom: 6, letterSpacing: '0.5px' }}>
                         💡 Follow-up Prompts
                       </div>
                       {followUpQuestions.map((q, idx) => (
@@ -2087,8 +1743,10 @@ function MainPageContent() {
               {/* Recording Card */}
               <div className="glass-card" style={{
                 padding: 24,
-                border: status === 'recording' ? '1px solid rgba(255, 68, 102, 0.5)' : '1px solid rgba(184,155,114,0.15)',
-                boxShadow: status === 'recording' ? '0 0 30px rgba(255, 68, 102, 0.2)' : 'none',
+                ...(status === 'recording' ? {
+                  border: '1px solid rgba(255, 68, 102, 0.5)',
+                  boxShadow: '0 0 30px rgba(255, 68, 102, 0.2)',
+                } : {}),
                 transition: 'all 0.3s',
               }}>
                 {/* Status Indicator */}
@@ -2220,11 +1878,7 @@ function MainPageContent() {
                     }}>
                       ◈ AUDIO MEMORY CAPTURED
                     </p>
-                    <audio controls src={audioUrl} style={{
-                      width: '100%',
-                      height: 32,
-                      borderRadius: 4,
-                    }} />
+                    <audio controls src={audioUrl} className="custom-audio" style={{ width: '100%' }} />
                   </div>
                 )}
 
@@ -2383,7 +2037,7 @@ function MainPageContent() {
 
               {/* All Recording History - Collapsible */}
               {answerHistory.length > 0 && (
-                <div className="glass-card" style={{ padding: 20, marginTop: 16 }}>
+                <div className="glass-card" style={{ padding: 20, marginTop: 8 }}>
                   <button
                     onClick={() => setShowHistory(!showHistory)}
                     style={{
@@ -2453,7 +2107,7 @@ function MainPageContent() {
                             <div style={{ marginTop: 4 }}>
                               {idx === 0 && editingTranscript === session.id ? (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                  <div style={{ fontSize: 11, color: '#fbbf24', fontWeight: 600, marginBottom: 4 }}>
+                                  <div style={{ fontSize: 11, color: '#8B7355', fontWeight: 600, marginBottom: 4 }}>
                                     ✏️ Quick Edit（edit full paragraph or first 2 sentences）
                                   </div>
                                   <textarea
@@ -2463,10 +2117,10 @@ function MainPageContent() {
                                       width: '100%',
                                       minHeight: 100,
                                       padding: 12,
-                                      background: '#1a1f2e',
-                                      border: '1px solid rgba(184,155,114,0.3)',
+                                      background: 'var(--card)',
+                                      border: '1px solid var(--border)',
                                       borderRadius: 8,
-                                      color: '#222',
+                                      color: 'var(--ink)',
                                       fontSize: 12,
                                       lineHeight: 1.6,
                                       resize: 'vertical',
@@ -2557,9 +2211,9 @@ function MainPageContent() {
                                             padding: '4px 10px',
                                             fontSize: 11,
                                             fontWeight: 600,
-                                            background: 'rgba(251, 191, 36, 0.15)',
-                                            color: '#fbbf24',
-                                            border: '1px solid rgba(251, 191, 36, 0.3)',
+                                            background: 'rgba(184, 155, 114, 0.15)',
+                                            color: '#8B7355',
+                                            border: '1px solid rgba(184, 155, 114, 0.3)',
                                             borderRadius: 4,
                                             cursor: 'pointer',
                                           }}
@@ -2586,7 +2240,7 @@ function MainPageContent() {
                                   </div>
                                   <div style={{
                                     fontSize: 12,
-                                    color: idx === 0 ? '#FAF8F5' : '#5A4F43',
+                                    color: idx === 0 ? 'var(--ink)' : '#5A4F43',
                                     lineHeight: 1.5,
                                     maxHeight: 120,
                                     overflowY: 'auto',
@@ -2797,26 +2451,36 @@ function MainPageContent() {
               )}
 
               {/* Biography Outline CTA */}
-              <div style={{
-                background: outlineUnlocked ? 'linear-gradient(135deg, rgba(184,155,114,0.1) 0%, rgba(168,136,100,0.1) 100%)' : 'rgba(13, 18, 25, 0.85)',
-                borderRadius: 4,
-                padding: 20,
-                boxShadow: outlineUnlocked ? '0 0 20px rgba(184,155,114,0.15)' : 'none',
-                border: outlineUnlocked ? '1px solid rgba(184,155,114,0.3)' : '1px solid rgba(184,155,114,0.1)',
-                color: outlineUnlocked ? '#222' : '#5A4F43',
-                marginTop: 16,
-              }}>
-                <div style={{ fontSize: 32, marginBottom: 12 }}>{outlineUnlocked ? '📖' : '📑'}</div>
-                <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 700 }}>
-                  Review & Generate Biography Outline
-                </h3>
-                <p style={{ margin: '0 0 16px', fontSize: 13, opacity: outlineUnlocked ? 0.95 : 0.75, lineHeight: 1.5 }}>
-                  {outlineUnlocked
-                    ? `You've completed ${answeredSet.size} questions! Review unlocks at ${MIN_ANSWERS_FOR_OUTLINE}+. You can generate or refine your outline.`
-                    : `Completed ${answeredSet.size} / ${MIN_ANSWERS_FOR_OUTLINE} questions. Reach ${MIN_ANSWERS_FOR_OUTLINE} to generate your outline。`}
-                </p>
-                
-                {outlineUnlocked ? (
+              {loadingAnswers ? (
+                <div className="glass-card" style={{
+                  padding: 20,
+                  marginTop: 8,
+                  height: 140, // Approximate height of the content
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12
+                }}>
+                  <div style={{ width: 40, height: 40, background: '#f0f0f0', borderRadius: 4 }} />
+                  <div style={{ width: '60%', height: 24, background: '#f0f0f0', borderRadius: 4 }} />
+                  <div style={{ width: '80%', height: 16, background: '#f0f0f0', borderRadius: 4 }} />
+                </div>
+              ) : (
+                <div className="glass-card" style={{
+                  padding: 20,
+                  marginTop: 8,
+                  color: outlineUnlocked ? '#222' : '#8C8377',
+                }}>
+                  <div style={{ fontSize: 32, marginBottom: 12, opacity: outlineUnlocked ? 1 : 0.6 }}>{outlineUnlocked ? '📖' : '📑'}</div>
+                  <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 700, color: outlineUnlocked ? '#2C2C2C' : '#5A4F43' }}>
+                    Review & Generate Biography Outline
+                  </h3>
+                  <p style={{ margin: '0 0 16px', fontSize: 13, opacity: outlineUnlocked ? 0.95 : 0.8, lineHeight: 1.5, color: outlineUnlocked ? '#5A4F43' : '#8C8377' }}>
+                    {outlineUnlocked
+                      ? `You've completed ${answeredCoreCount} core questions${customQuestionCount > 0 ? ` (+${answeredCustomCount} custom)` : ''}! Review unlocks at ${MIN_ANSWERS_FOR_OUTLINE}+. You can generate or refine your outline.`
+                      : `Completed ${answeredCoreCount} / ${MIN_ANSWERS_FOR_OUTLINE} core questions. Reach ${MIN_ANSWERS_FOR_OUTLINE} to generate your outline.`}
+                  </p>
+                  
+                  {outlineUnlocked ? (
                   generatingOutline ? (
                     <div style={{
                       padding: 16,
@@ -2940,6 +2604,7 @@ function MainPageContent() {
                   </div>
                 )}
               </div>
+            )}
             </div>
 
             {/* Right Column: Question Bank */}
@@ -2965,16 +2630,38 @@ function MainPageContent() {
                     color: '#5A4F43',
                     letterSpacing: '1px',
                   }}>COMPLETION STATUS</h3>
-                  <span style={{
-                    fontSize: 14,
-                    color: '#8B7355',
-                    fontWeight: 700,
-                    fontFamily: 'monospace',
-                  }}>{progressCount} / {totalCount > 0 ? totalCount : '—'}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                    <span style={{
+                      fontSize: 14,
+                      color: '#8B7355',
+                      fontWeight: 700,
+                      fontFamily: 'monospace',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}>
+                      {customQuestionCount > 0 ? (
+                        <>
+                          {answeredCoreCount + answeredCustomCount} / (
+                          <span title="100个核心问题" style={{ cursor: 'help' }}>
+                            {coreQuestionCount > 0 ? coreQuestionCount : CORE_QUESTION_COUNT}
+                          </span>
+                          {' + '}
+                          <span title={`${customQuestionCount}个用户自定义问题`} style={{ cursor: 'help' }}>
+                            {customQuestionCount}
+                          </span>
+                          )
+                        </>
+                      ) : (
+                        `${answeredCoreCount} / ${coreQuestionCount > 0 ? coreQuestionCount : CORE_QUESTION_COUNT}`
+                      )}
+                    </span>
+                  </div>
                 </div>
                 <div className="cyber-progress">
                   <div className="cyber-progress-bar" style={{
-                    width: totalCount > 0 ? `${(progressCount / totalCount) * 100}%` : '0%',
+                    // 进度条只显示核心问题的完成度
+                    width: coreQuestionCount > 0 ? `${(answeredCoreCount / coreQuestionCount) * 100}%` : '0%',
                   }} />
                 </div>
               </div>
@@ -3299,6 +2986,7 @@ function MainPageContent() {
                   )
                 })}
               </div>
+              <CompletionMilestones answeredCount={answeredCoreCount} />
             </div>
           </div>
         )}
@@ -4241,281 +3929,95 @@ function MainPageContent() {
           left: 0,
           right: 0,
           bottom: 0,
-          background: 'rgba(248,246,242,0.7)',
+          background: 'rgba(247,245,242,0.8)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           zIndex: 1001,
         }} onClick={() => setShowPremiumModal(false)}>
           <div style={{
-            background: 'linear-gradient(135deg, #0b1220 0%, #1a1f2e 100%)',
-            border: '2px solid rgba(255, 215, 0, 0.3)',
-            borderRadius: 16,
-            padding: 32,
-            maxWidth: 600,
-            maxHeight: '90vh',
-            overflow: 'auto',
-            boxShadow: '0 20px 80px rgba(255, 215, 0, 0.2)',
+            background: 'var(--card)',
+            border: '1px solid var(--border)',
+            borderRadius: 20,
+            padding: 28,
+            maxWidth: 520,
+            width: '90%',
+            boxShadow: 'var(--shadow)',
           }} onClick={e => e.stopPropagation()}>
-            <div style={{
-              textAlign: 'center',
-              marginBottom: 32,
-            }}>
-              <div style={{
-                fontSize: 32,
-                marginBottom: 12,
-              }}>
-                ✨
+            <div style={{ textAlign: 'center', marginBottom: 20 }}>
+              <div style={{ fontSize: 12, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--muted)' }}>
+                Everarchive Pro
               </div>
-              <div style={{
-                fontSize: 24,
-                fontWeight: 700,
-                background: 'linear-gradient(135deg, #ffd700, #ffed4e)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-                marginBottom: 8,
-              }}>
-                PREMIUM FEATURES
+              <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--ink)', marginTop: 6 }}>
+                Everarchive Pro 会员
               </div>
-              <div style={{
-                fontSize: 13,
-                color: '#5A4F43',
-              }}>
-                Unlock advanced tools for richer storytelling
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
+                解锁完整功能与高阶工具
               </div>
             </div>
 
-            {/* Feature Grid */}
             <div style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 16,
-              marginBottom: 28,
+              border: '1px solid var(--border)',
+              borderRadius: 16,
+              padding: 20,
+              background: 'linear-gradient(180deg, #ffffff, #f6f2ec)',
+              marginBottom: 20,
             }}>
-              {[
-                { icon: '✏️', title: 'Advanced Editing', desc: 'Edit transcripts, rearrange, merge answers' },
-                { icon: '🎨', title: 'Professional Formatting', desc: 'Custom fonts, colors, layouts for exports' },
-                { icon: '📄', title: 'PDF/Print Export', desc: 'High-quality biography documents' },
-                { icon: '📸', title: 'Unlimited Photos', desc: 'Store unlimited images per answer' },
-                { icon: '🤖', title: 'AI Enhancement', desc: 'Auto-suggestions for incomplete answers' },
-                { icon: '⚡', title: 'Priority Processing', desc: 'Faster transcription & outline generation' },
-              ].map((feature, idx) => (
-                <div key={idx} style={{
-                  padding: 16,
-                  background: 'rgba(255, 215, 0, 0.05)',
-                  border: '1px solid rgba(255, 215, 0, 0.15)',
-                  borderRadius: 10,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  textAlign: 'center',
-                }}>
-                  <div style={{ fontSize: 24, marginBottom: 8 }}>{feature.icon}</div>
-                  <div style={{
+              <div style={{ fontSize: 32, fontWeight: 700, color: 'var(--ink)' }}>{`$${99.9}`}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>每月</div>
+                <button
+                  onClick={() => handlePurchase('pro')}
+                  disabled={isProcessing}
+                  style={{
+                    marginTop: 14,
+                    width: '100%',
+                    padding: '10px 12px',
+                    background: 'var(--accent)',
+                    border: 'none',
+                    color: '#fff',
+                    borderRadius: 8,
+                    cursor: isProcessing ? 'wait' : 'pointer',
                     fontSize: 12,
-                    fontWeight: 600,
-                    color: '#ffd700',
-                    marginBottom: 4,
-                  }}>
-                    {feature.title}
-                  </div>
-                  <div style={{
-                    fontSize: 10,
-                    color: '#5A4F43',
-                    lineHeight: 1.4,
-                  }}>
-                    {feature.desc}
-                  </div>
-                </div>
-              ))}
+                    fontWeight: 700,
+                  }}
+                >
+                {isProcessing ? '处理中...' : (isPremium ? '管理订阅' : '立即开通 Everarchive Pro')}
+                </button>
             </div>
 
-            {/* Pricing Tiers */}
-            <div style={{
-              marginBottom: 24,
-            }}>
-              <div style={{
-                fontSize: 14,
-                fontWeight: 700,
-                color: '#222',
-                marginBottom: 12,
-                textAlign: 'center',
-              }}>
-                Simple Pricing
-              </div>
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: 12,
-              }}>
-                {/* Monthly Plan */}
-                <div style={{
-                  padding: 16,
-                  background: 'rgba(184,155,114,0.05)',
-                  border: '1px solid rgba(184,155,114,0.2)',
-                  borderRadius: 10,
-                }}>
-                  <div style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: '#8B7355',
-                    marginBottom: 8,
-                  }}>
-                    Monthly
-                  </div>
-                  <div style={{
-                    fontSize: 24,
-                    fontWeight: 700,
-                    color: '#ffd700',
-                    marginBottom: 4,
-                  }}>
-                    $9.99
-                  </div>
-                  <div style={{
-                    fontSize: 11,
-                    color: '#5A4F43',
-                    marginBottom: 12,
-                  }}>
-                    per month
-                  </div>
-                  <button
-                    onClick={() => {
-                      showToast('Premium checkout coming soon. Please contact support or use a redemption code', 'success')
-                    }}
-                    disabled={isPremium}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      background: isPremium ? 'rgba(0, 212, 255, 0.2)' : 'linear-gradient(135deg, #8B7355, #A89070)',
-                      border: 'none',
-                      color: isPremium ? '#7acfe3' : '#0b1220',
-                      borderRadius: 6,
-                      cursor: isPremium ? 'not-allowed' : 'pointer',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      opacity: isPremium ? 0.8 : 1,
-                    }}
-                  >
-                    {isPremium ? '✓ Active' : 'Contact to Upgrade'}
-                  </button>
-                </div>
-
-                {/* Annual Plan */}
-                <div style={{
-                  padding: 16,
-                  background: 'linear-gradient(135deg, rgba(255, 215, 0, 0.1), rgba(255, 165, 0, 0.1))',
-                  border: '2px solid rgba(255, 215, 0, 0.3)',
-                  borderRadius: 10,
-                  position: 'relative',
-                }}>
-                  <div style={{
-                    position: 'absolute',
-                    top: -10,
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    background: 'linear-gradient(135deg, #ffd700, #ffed4e)',
-                    color: '#0b1220',
-                    padding: '2px 12px',
-                    borderRadius: 12,
-                    fontSize: 9,
-                    fontWeight: 700,
-                  }}>
-                    BEST VALUE
-                  </div>
-                  <div style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: '#ffd700',
-                    marginBottom: 8,
-                  }}>
-                    Annual
-                  </div>
-                  <div style={{
-                    fontSize: 24,
-                    fontWeight: 700,
-                    color: '#ffd700',
-                    marginBottom: 4,
-                  }}>
-                    $79.99
-                  </div>
-                  <div style={{
-                    fontSize: 11,
-                    color: '#5A4F43',
-                    marginBottom: 12,
-                  }}>
-                    ~$6.67/month (save 33%)
-                  </div>
-                  <button
-                    onClick={() => {
-                      showToast('Premium checkout coming soon. Please contact support or use a redemption code', 'success')
-                    }}
-                    disabled={isPremium}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      background: isPremium ? 'rgba(255, 215, 0, 0.3)' : 'linear-gradient(135deg, #ffd700, #ffed4e)',
-                      border: 'none',
-                      color: isPremium ? '#bca200' : '#0b1220',
-                      borderRadius: 6,
-                      cursor: isPremium ? 'not-allowed' : 'pointer',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      opacity: isPremium ? 0.85 : 1,
-                    }}
-                  >
-                    {isPremium ? '✓ Active' : 'Contact to Upgrade'}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Benefits List */}
             <div style={{
               padding: 16,
-              background: 'rgba(16, 185, 129, 0.05)',
-              border: '1px solid rgba(16, 185, 129, 0.2)',
-              borderRadius: 8,
+              border: '1px solid var(--border)',
+              borderRadius: 12,
+              background: 'var(--card)',
               marginBottom: 16,
             }}>
-              <div style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: '#8B7355',
-                marginBottom: 8,
-              }}>
-                ✓ Why Go Premium?
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>
+                PRO 包含
               </div>
-              <ul style={{
-                margin: 0,
-                paddingLeft: 16,
-                fontSize: 11,
-                color: '#5A4F43',
-                lineHeight: 1.6,
-              }}>
-                <li>Professional-grade exports for sharing with family</li>
-                <li>Never lose memories to storage limits</li>
-                <li>AI-powered suggestions to enrich your stories</li>
-                <li>Priority support & early access to new features</li>
+              <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: 'var(--muted)', lineHeight: 1.7 }}>
+                <li>高级排版与导出（PDF/打印）</li>
+                <li>无限照片与素材空间</li>
+                <li>AI 补全与优先处理</li>
+                <li>更多主题与排版模版</li>
               </ul>
             </div>
 
-            {/* Close Button */}
             <button
               onClick={() => setShowPremiumModal(false)}
               style={{
                 width: '100%',
                 padding: '10px 12px',
-                background: 'rgba(255, 68, 102, 0.1)',
-                border: '1px solid rgba(255, 68, 102, 0.2)',
-                color: '#ff9aa2',
-                borderRadius: 6,
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                color: 'var(--muted)',
+                borderRadius: 8,
                 cursor: 'pointer',
                 fontSize: 12,
                 fontWeight: 600,
               }}
             >
-              Continue as Free User
+              继续使用免费版
             </button>
           </div>
         </div>
@@ -4560,10 +4062,6 @@ export default function Home() {
     </Suspense>
   )
 }
-
-
-
-
 
 
 

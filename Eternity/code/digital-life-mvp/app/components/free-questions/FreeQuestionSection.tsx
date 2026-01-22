@@ -110,8 +110,9 @@ export function FreeQuestionSection({
       try {
         const questionId = await onSaveQuestion(updatedSlot.question.text, chapterName)
         updatedSlot = { ...updatedSlot, questionId }
-      } catch (error) {
-        console.error('保存问题到 Supabase 失败:', error)
+      } catch (error: any) {
+        console.error('保存问题到 Supabase 失败:', error?.message || error)
+        // 不抛出错误，允许槽位更新为 filled 状态，用户可以稍后重试
       }
     }
     setSlots(prev => prev.map(s => s.id === updatedSlot.id ? updatedSlot : s))
@@ -145,38 +146,38 @@ export function FreeQuestionSection({
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="w-full flex items-center justify-between px-3 py-2
-                   text-sm text-cyan-400/60 hover:text-cyan-400
-                   hover:bg-white/5 rounded transition-colors group"
+                   text-sm text-[var(--ink)] hover:text-[var(--ink)]
+                   hover:bg-white rounded transition-colors group border border-[var(--border)]"
       >
         <span className="flex items-center gap-2">
           <span className="text-base leading-none opacity-70 group-hover:opacity-100">+</span>
           <span>自由问题</span>
-          <span className="text-xs text-white/40">
+          <span className="text-xs text-[var(--muted)]">
             ({filledSlots.length}/{MAX_SLOTS})
           </span>
         </span>
-        <span className="text-xs text-white/30 group-hover:text-white/50">
+        <span className="text-xs text-[var(--muted)]">
           {isExpanded ? '▲ 收起' : '▼ 展开'}
         </span>
       </button>
 
       {/* 展开内容 */}
       {isExpanded && (
-        <div className="mt-2 ml-2 pl-3 border-l border-cyan-900/30 space-y-3">
+        <div className="mt-2 ml-2 pl-3 border-l border-slate-200 space-y-3">
           {/* 已有自由问题列表（来自 existingQuestions） */}
           {existingQuestions.map(existingQ => (
-            <div key={existingQ.id} className="flex items-start gap-2 py-2 px-3 rounded hover:bg-white/5 transition-colors">
-              <span className="mt-0.5 flex-shrink-0 text-cyan-400">●</span>
+            <div key={existingQ.id} className="flex items-start gap-2 py-2 px-3 rounded hover:bg-slate-100 transition-colors">
+              <span className="mt-0.5 flex-shrink-0 text-[#B89B72]">●</span>
               <span 
                 onClick={() => onQuestionClick?.(existingQ.id)}
-                className="flex-1 text-sm leading-relaxed text-white/90 hover:text-cyan-300 cursor-pointer"
+                className="flex-1 text-sm leading-relaxed text-slate-800 hover:text-[#8B7355] cursor-pointer"
               >
                 {existingQ.text}
               </span>
               <button
                 onClick={() => onDeleteQuestion?.(existingQ.id)}
-                className="px-2 py-0.5 text-xs text-white/40 hover:text-red-400
-                           hover:bg-red-500/10 rounded transition-colors flex-shrink-0"
+                className="px-2 py-0.5 text-xs text-slate-400 hover:text-red-600
+                           hover:bg-red-50 rounded transition-colors flex-shrink-0"
               >
                 删除
               </button>
@@ -203,7 +204,7 @@ export function FreeQuestionSection({
           {/* 空状态 - 直接显示添加选项 */}
           {slots.length === 0 && canAddMore && (
             <div className="space-y-2">
-              <p className="text-xs text-white/30 leading-relaxed">
+              <p className="text-xs text-slate-500 leading-relaxed">
                 写下你自己想回答的问题，或让 AI 帮你想一个
               </p>
               <SlotEmptyState
@@ -229,8 +230,9 @@ export function FreeQuestionSection({
                     if (onSaveQuestion) {
                       try {
                         questionId = await onSaveQuestion(questionText, chapterName)
-                      } catch (e) {
-                        console.error('保存问题到 Supabase 失败:', e)
+                      } catch (e: any) {
+                        console.error('保存 AI 生成问题到 Supabase 失败:', e?.message || e)
+                        // 继续执行，允许用户稍后重试保存
                       }
                     }
                     setSlots([{
@@ -258,7 +260,7 @@ export function FreeQuestionSection({
 
           {/* 达到上限提示 */}
           {!canAddMore && slots.length > 0 && (
-            <p className="text-xs text-white/20 py-1">
+            <p className="text-xs text-slate-400 py-1">
               已达到自由问题上限
             </p>
           )}

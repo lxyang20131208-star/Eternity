@@ -13,6 +13,7 @@ import {
   getQuestionTypeColor,
   type Round2Question,
 } from '../../lib/round2Api'
+import UnifiedNav from '../components/UnifiedNav'
 
 function uuid() {
   return crypto.randomUUID()
@@ -22,101 +23,19 @@ type RecordingStatus = 'idle' | 'recording' | 'stopped' | 'uploading' | 'done' |
 
 function QuestionTypeTag({ type }: { type: Round2Question['question_type'] }) {
   const label = getQuestionTypeLabel(type)
-  const color = getQuestionTypeColor(type)
-
+  // Map original colors to theme colors if needed, or keep them subtle
+  // Using a neutral/theme compatible style
   return (
     <span
-      className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold"
-      style={{ backgroundColor: `${color}15`, color }}
+      className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold border"
+      style={{ 
+        backgroundColor: '#F8F6F2', 
+        color: '#5A4F43',
+        borderColor: '#E3D6C6'
+      }}
     >
       {label}
     </span>
-  )
-}
-
-function QuestionCard({
-  question,
-  isActive,
-  onSelect,
-  onSkip,
-}: {
-  question: Round2Question
-  isActive: boolean
-  onSelect: () => void
-  onSkip: () => void
-}) {
-  const isAnswered = question.status === 'answered'
-  const isSkipped = question.status === 'skipped'
-
-  return (
-    <div
-      className={`relative overflow-hidden rounded-xl border-2 p-5 transition-all ${
-        isActive
-          ? 'border-amber-400 bg-amber-50 shadow-lg'
-          : isAnswered
-            ? 'border-emerald-300 bg-emerald-50'
-            : isSkipped
-              ? 'border-slate-200 bg-slate-50 opacity-60'
-              : 'border-slate-200 bg-white hover:border-amber-200 hover:shadow-md'
-      }`}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <QuestionTypeTag type={question.question_type} />
-            {question.related_chapter && (
-              <span className="text-xs text-slate-500">{question.related_chapter}</span>
-            )}
-            {isAnswered && (
-              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-                已回答
-              </span>
-            )}
-            {isSkipped && (
-              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                已跳过
-              </span>
-            )}
-          </div>
-
-          <p className="text-base font-medium text-slate-800">{question.question_text}</p>
-
-          {question.media_prompt && (
-            <p className="mt-2 flex items-center gap-1.5 text-sm text-slate-500">
-              <span>📷</span>
-              {question.media_prompt}
-            </p>
-          )}
-
-          {question.missing_element_description && (
-            <p className="mt-2 text-xs text-slate-400 italic">
-              补充目的: {question.missing_element_description}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {!isAnswered && !isSkipped && (
-        <div className="mt-4 flex gap-2">
-          <button
-            onClick={onSelect}
-            className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
-              isActive
-                ? 'bg-amber-500 text-white'
-                : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-            }`}
-          >
-            {isActive ? '正在回答...' : '开始回答'}
-          </button>
-          <button
-            onClick={onSkip}
-            className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-200"
-          >
-            跳过
-          </button>
-        </div>
-      )}
-    </div>
   )
 }
 
@@ -134,87 +53,139 @@ function RecordingPanel({
   error: string | null
 }) {
   return (
-    <div className="rounded-xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 to-orange-50 p-6">
-      <h3 className="mb-4 text-lg font-bold text-slate-900">录音回答</h3>
+    <div className="glass-card" style={{
+      padding: 24,
+      border: status === 'recording' ? '1px solid rgba(255, 68, 102, 0.5)' : '1px solid rgba(184,155,114,0.15)',
+      boxShadow: status === 'recording' ? '0 0 30px rgba(255, 68, 102, 0.2)' : 'none',
+      transition: 'all 0.3s',
+    }}>
+      {/* Status Indicator */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        marginBottom: 20,
+        padding: '10px 16px',
+        background: '#F8F6F2',
+        borderRadius: 4,
+        fontSize: 12,
+        fontWeight: 600,
+        letterSpacing: '1px',
+        color:
+          status === 'done' ? '#8B7355' :
+          status === 'error' ? '#ff4466' :
+          status === 'recording' ? '#ff4466' :
+          status === 'uploading' ? '#8B7355' : '#5A4F43',
+      }}>
+        <span style={{
+          width: 10,
+          height: 10,
+          borderRadius: '50%',
+          background:
+            status === 'done' ? '#8B7355' :
+            status === 'error' ? '#ff4466' :
+            status === 'recording' ? '#ff4466' :
+            status === 'uploading' ? '#8B7355' : '#5A4F43',
+          boxShadow:
+            status === 'recording' ? '0 0 15px #ff4466' :
+            status === 'done' ? '0 0 15px #8B7355' : 'none',
+          animation: status === 'recording' ? 'pulse-glow 1s ease-in-out infinite' : 'none',
+        }} />
+        {status === 'idle' && 'STANDBY'}
+        {status === 'recording' && 'REC ●'}
+        {status === 'stopped' && 'RECORDING COMPLETE'}
+        {status === 'uploading' && 'PROCESSING...'}
+        {status === 'done' && 'MEMORY SAVED'}
+        {status === 'error' && 'ERROR'}
+      </div>
 
       {error && (
         <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
 
-      <div className="flex flex-col items-center gap-4">
-        {status === 'idle' && (
-          <button
-            onClick={onStart}
-            className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-red-600 text-3xl text-white shadow-lg transition hover:scale-105 hover:shadow-xl"
-          >
-            🎤
-          </button>
-        )}
-
-        {status === 'recording' && (
-          <>
-            <div className="flex items-center gap-2 text-red-600">
-              <span className="h-3 w-3 animate-pulse rounded-full bg-red-500" />
-              <span className="font-semibold">录音中...</span>
-            </div>
-            <button
-              onClick={onStop}
-              className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-slate-600 to-slate-700 text-3xl text-white shadow-lg transition hover:scale-105"
-            >
-              ⏹️
-            </button>
-          </>
-        )}
-
-        {status === 'stopped' && (
-          <div className="text-center text-slate-600">
-            <div className="mb-2 text-2xl">✓</div>
-            <div>录音已停止，正在处理...</div>
-          </div>
-        )}
-
-        {status === 'uploading' && (
-          <div className="flex items-center gap-2 text-amber-600">
-            <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24">
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-                fill="none"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-              />
-            </svg>
-            <span className="font-semibold">上传中...</span>
-          </div>
-        )}
-
-        {status === 'done' && audioUrl && (
-          <div className="w-full">
-            <div className="mb-2 text-center text-emerald-600 font-semibold">回答已保存!</div>
-            <audio controls src={audioUrl} className="w-full" />
-          </div>
-        )}
-
-        {status === 'error' && (
-          <button
-            onClick={onStart}
-            className="rounded-lg bg-amber-500 px-6 py-3 font-semibold text-white shadow transition hover:bg-amber-600"
-          >
-            重新录音
-          </button>
-        )}
+      {/* Recording Buttons */}
+      <div style={{
+        display: 'flex',
+        gap: 12,
+        marginBottom: 20,
+      }}>
+        <button
+          onClick={onStart}
+          disabled={status === 'recording' || status === 'uploading'}
+          className={status === 'recording' || status === 'uploading' ? '' : 'cyber-btn cyber-btn-primary'}
+          style={{
+            flex: 1,
+            padding: '16px 18px',
+            fontSize: 13,
+            fontWeight: 700,
+            letterSpacing: '1px',
+            background: status === 'recording' || status === 'uploading'
+              ? '#FFCCD6'
+              : '#F5D7B0',
+            color: status === 'recording' || status === 'uploading' ? '#ff3970' : '#5A4F43',
+            border: status === 'recording' || status === 'uploading'
+              ? '1px solid rgba(255, 68, 102, 0.4)'
+              : '1px solid rgba(90, 79, 67, 0.12)',
+            borderRadius: 8,
+            boxShadow: status === 'recording' || status === 'uploading'
+              ? '0 0 10px rgba(255, 68, 102, 0.25)'
+              : '0 8px 20px rgba(139, 115, 85, 0.08)',
+            cursor: status === 'recording' || status === 'uploading' ? 'not-allowed' : 'pointer',
+            transition: 'all 0.25s ease',
+            transform: status === 'recording' || status === 'uploading' ? 'none' : 'translateY(0)',
+          }}
+        >
+          ◉ {status === 'recording' ? 'RECORDING...' : 'START REC'}
+        </button>
+        <button
+          onClick={onStop}
+          disabled={status !== 'recording'}
+          className="cyber-btn cyber-btn-danger"
+          style={{
+            flex: 1,
+            padding: '16px 18px',
+            fontSize: 13,
+            fontWeight: 700,
+            letterSpacing: '1px',
+            borderRadius: 8,
+            background: status === 'recording'
+              ? 'linear-gradient(135deg, #ff6b6b, #ff3366)'
+              : 'white',
+            color: status === 'recording' ? '#2C2C2C' : '#5A4F43',
+            border: status === 'recording'
+              ? '1px solid rgba(255, 107, 107, 0.6)'
+              : '1px solid rgba(90, 79, 67, 0.06)',
+            boxShadow: status === 'recording'
+              ? '0 12px 30px rgba(255, 51, 102, 0.25)'
+              : 'none',
+            opacity: status === 'recording' ? 1 : 0.95,
+            cursor: status === 'recording' ? 'pointer' : 'not-allowed',
+            transition: 'all 0.25s ease',
+          }}
+        >
+          ◼ STOP
+        </button>
       </div>
 
-      <p className="mt-4 text-center text-xs text-slate-500">
-        点击麦克风开始录音，再次点击停止
-      </p>
+      {audioUrl && (
+        <div style={{
+          padding: 16,
+          background: 'rgba(0, 255, 136, 0.05)',
+          border: '1px solid rgba(0, 255, 136, 0.3)',
+          borderRadius: 4,
+        }}>
+          <p style={{
+            margin: '0 0 12px',
+            fontSize: 12,
+            fontWeight: 600,
+            color: '#8B7355',
+            letterSpacing: '1px',
+          }}>
+            ◈ AUDIO MEMORY CAPTURED
+          </p>
+          <audio controls src={audioUrl} className="custom-audio" style={{ width: '100%' }} />
+        </div>
+      )}
     </div>
   )
 }
@@ -286,6 +257,16 @@ export default function Round2Page() {
         ])
         setQuestions(questionsData)
         setProgress(progressData)
+        
+        // Auto-select first pending question if none selected
+        if (!activeQuestionId && questionsData.length > 0) {
+            const firstPending = questionsData.find(q => q.status === 'pending')
+            if (firstPending) {
+                setActiveQuestionId(firstPending.id)
+            } else {
+                setActiveQuestionId(questionsData[0].id)
+            }
+        }
       } catch (e: any) {
         setError(e?.message ?? '加载问题失败')
       }
@@ -378,7 +359,9 @@ export default function Round2Page() {
 
           setAudioUrl(signed?.signedUrl ?? null)
           setRecordingStatus('done')
-          setActiveQuestionId(null)
+          
+          // Optional: Auto-advance could go here
+          
         } catch (e: any) {
           setRecordingError(e?.message ?? String(e))
           setRecordingStatus('error')
@@ -423,31 +406,14 @@ export default function Round2Page() {
   }
 
   const activeQuestion = questions.find((q) => q.id === activeQuestionId)
-  const pendingQuestions = questions.filter((q) => q.status === 'pending')
-  const completedQuestions = questions.filter((q) => q.status === 'answered' || q.status === 'skipped')
-
+  
   if (loading) {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-amber-50 to-white">
-        <div className="mx-auto max-w-4xl px-4 py-12 text-slate-600">正在加载...</div>
-      </main>
-    )
-  }
-
-  if (questions.length === 0) {
-    return (
-      <main className="min-h-screen bg-gradient-to-b from-amber-50 to-white">
-        <div className="mx-auto max-w-4xl px-4 py-12">
-          <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-            <div className="mb-4 text-4xl">📝</div>
-            <h2 className="mb-2 text-xl font-bold text-slate-800">暂无补充问题</h2>
-            <p className="mb-6 text-slate-600">请先在进度页面点击"深度补充"生成问题</p>
-            <Link
-              href="/progress"
-              className="inline-block rounded-lg bg-amber-500 px-6 py-3 font-semibold text-white shadow transition hover:bg-amber-600"
-            >
-              返回进度页面
-            </Link>
+      <main className="detroit-bg" style={{ minHeight: '100vh', padding: '24px 16px', fontFamily: '"Source Han Serif SC", serif' }}>
+         <div style={{ maxWidth: 1400, margin: '0 auto' }}>
+          <UnifiedNav />
+          <div style={{ padding: 40, textAlign: 'center', color: '#8C8377' }}>
+             LOADING SYSTEM...
           </div>
         </div>
       </main>
@@ -455,127 +421,311 @@ export default function Round2Page() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-amber-50 via-white to-amber-50">
-      <div className="mx-auto max-w-4xl px-4 py-10">
-        <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-600">
-              Deep Supplement
+    <main className="detroit-bg" style={{
+      minHeight: '100vh',
+      padding: '24px 16px',
+      fontFamily: '"Source Han Serif SC", "Songti SC", "SimSun", serif',
+    }}>
+      <div style={{
+        maxWidth: 1400,
+        margin: '0 auto',
+      }}>
+        <UnifiedNav />
+
+        {/* Header Area */}
+        <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+                 <h1 style={{ fontSize: 24, fontWeight: 700, color: '#222' }}>深度补充 / Deep Dive</h1>
+                 <p style={{ fontSize: 13, color: '#5A4F43', marginTop: 4 }}>AI 分析出的关键细节补充，完善您的人生故事</p>
             </div>
-            <h1 className="mt-1 text-3xl font-bold text-slate-900">深度补充问题</h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <Link
+             <Link
               href="/progress"
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+              className="cyber-btn"
+              style={{ borderRadius: 4, textDecoration: 'none', fontSize: 12 }}
             >
-              返回进度
+              ◁ 返回进度
             </Link>
-          </div>
-        </header>
+        </div>
 
         {error && (
-          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
+            <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', borderRadius: 8, marginBottom: 20 }}>
+                {error}
+            </div>
         )}
 
-        {/* Progress bar */}
-        <div className="mb-8 rounded-xl border border-amber-200 bg-white p-4 shadow-sm">
-          <div className="mb-2 flex items-center justify-between text-sm">
-            <span className="text-slate-600">回答进度</span>
-            <span className="font-semibold text-amber-600">
-              {progress.answered} / {progress.total} 已完成
-            </span>
-          </div>
-          <div className="h-3 overflow-hidden rounded-full bg-amber-100">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 transition-all"
-              style={{ width: `${progress.total > 0 ? (progress.answered / progress.total) * 100 : 0}%` }}
-            />
-          </div>
-          <div className="mt-2 flex gap-4 text-xs text-slate-500">
-            <span>待回答: {progress.pending}</span>
-            <span>已跳过: {progress.skipped}</span>
-          </div>
-        </div>
+        {/* Two Column Layout */}
+        <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 24,
+        }} className="two-column-layout">
+            
+            {/* Left Column: Operation Area */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                
+                {activeQuestion ? (
+                    <>
+                        {/* Question Card */}
+                        <div className="glass-card" style={{ padding: 24, position: 'relative', overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 16 }}>
+                                <div style={{
+                                    padding: '6px 12px',
+                                    background: 'rgba(184,155,114,0.1)',
+                                    color: '#8B7355',
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    borderRadius: 4,
+                                    border: '1px solid rgba(184,155,114,0.3)',
+                                    letterSpacing: '1px',
+                                }}>
+                                    SUPPLEMENT
+                                </div>
+                                <div style={{
+                                    fontSize: 12,
+                                    color: '#5A4F43',
+                                    flex: 1,
+                                    padding: '6px 0',
+                                    display: 'flex',
+                                    gap: 8,
+                                    alignItems: 'center'
+                                }}>
+                                     {activeQuestion.related_chapter && <span>📘 {activeQuestion.related_chapter}</span>}
+                                     <QuestionTypeTag type={activeQuestion.question_type} />
+                                </div>
+                            </div>
 
-        <div className="grid gap-8 lg:grid-cols-2">
-          {/* Left: Question list */}
-          <div className="space-y-4">
-            <h2 className="text-lg font-bold text-slate-800">
-              待回答 ({pendingQuestions.length})
-            </h2>
-            {pendingQuestions.map((q) => (
-              <QuestionCard
-                key={q.id}
-                question={q}
-                isActive={activeQuestionId === q.id}
-                onSelect={() => handleSelectQuestion(q.id)}
-                onSkip={() => handleSkip(q.id)}
-              />
-            ))}
+                            <h3 style={{
+                                margin: '0 0 16px',
+                                fontSize: 20,
+                                fontWeight: 500,
+                                color: '#222',
+                                lineHeight: 1.5,
+                            }}>
+                                {activeQuestion.question_text}
+                            </h3>
 
-            {completedQuestions.length > 0 && (
-              <>
-                <h2 className="mt-8 text-lg font-bold text-slate-800">
-                  已完成 ({completedQuestions.length})
-                </h2>
-                {completedQuestions.map((q) => (
-                  <QuestionCard
-                    key={q.id}
-                    question={q}
-                    isActive={false}
-                    onSelect={() => {}}
-                    onSkip={() => {}}
-                  />
-                ))}
-              </>
-            )}
-          </div>
+                             {activeQuestion.missing_element_description && (
+                                <div style={{
+                                    padding: '12px',
+                                    background: 'rgba(184, 155, 114, 0.08)',
+                                    border: '1px solid rgba(184, 155, 114, 0.2)',
+                                    borderRadius: 8,
+                                    marginBottom: 16,
+                                }}>
+                                    <div style={{ fontSize: 11, color: '#8B7355', fontWeight: 600, marginBottom: 4 }}>
+                                        💡 补充方向
+                                    </div>
+                                    <div style={{ fontSize: 12, color: '#5A4F43' }}>
+                                        {activeQuestion.missing_element_description}
+                                    </div>
+                                </div>
+                            )}
 
-          {/* Right: Recording panel */}
-          <div className="lg:sticky lg:top-8 lg:self-start">
-            {activeQuestion ? (
-              <div>
-                <div className="mb-4 rounded-xl border border-amber-200 bg-white p-4">
-                  <div className="mb-2 flex items-center gap-2">
-                    <QuestionTypeTag type={activeQuestion.question_type} />
-                    <span className="text-xs text-slate-500">{activeQuestion.related_chapter}</span>
-                  </div>
-                  <p className="text-lg font-medium text-slate-800">{activeQuestion.question_text}</p>
+                             {activeQuestion.media_prompt && (
+                                <div style={{
+                                    padding: '12px',
+                                    background: 'rgba(0, 0, 0, 0.03)',
+                                    border: '1px solid rgba(0, 0, 0, 0.06)',
+                                    borderRadius: 8,
+                                    marginBottom: 16,
+                                    fontSize: 12,
+                                    color: '#666'
+                                }}>
+                                    📷 建议配图: {activeQuestion.media_prompt}
+                                </div>
+                            )}
+
+                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                 <button
+                                    onClick={() => handleSkip(activeQuestion.id)}
+                                    style={{
+                                        fontSize: 12,
+                                        color: '#999',
+                                        background: 'none',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        textDecoration: 'underline'
+                                    }}
+                                >
+                                    暂时跳过此题
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Recording Panel */}
+                        <RecordingPanel
+                            status={recordingStatus}
+                            onStart={startRecording}
+                            onStop={stopRecording}
+                            audioUrl={audioUrl}
+                            error={recordingError}
+                        />
+                    </>
+                ) : (
+                    <div className="glass-card" style={{ padding: 40, textAlign: 'center', color: '#8C8377' }}>
+                        <div style={{ fontSize: 32, marginBottom: 16 }}>✨</div>
+                        <p>请在右侧选择一个问题开始回答</p>
+                    </div>
+                )}
+
+            </div>
+
+            {/* Right Column: List */}
+            <div className="glass-card" style={{
+                padding: 20,
+                display: 'flex',
+                flexDirection: 'column',
+                maxHeight: 'calc(100vh - 200px)',
+                overflow: 'hidden',
+            }}>
+                 {/* Progress */}
+                <div style={{ marginBottom: 20 }}>
+                    <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: 12,
+                    }}>
+                        <h3 style={{
+                            margin: 0,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: '#5A4F43',
+                            letterSpacing: '1px',
+                        }}>COMPLETION STATUS</h3>
+                        <span style={{
+                            fontSize: 14,
+                            color: '#8B7355',
+                            fontWeight: 700,
+                            fontFamily: 'monospace',
+                        }}>{progress.answered} / {progress.total > 0 ? progress.total : '—'}</span>
+                    </div>
+                    <div className="cyber-progress">
+                        <div className="cyber-progress-bar" style={{
+                            width: progress.total > 0 ? `${(progress.answered / progress.total) * 100}%` : '0%',
+                            background: '#8B7355',
+                            boxShadow: 'none'
+                        }} />
+                    </div>
                 </div>
 
-                <RecordingPanel
-                  status={recordingStatus}
-                  onStart={startRecording}
-                  onStop={stopRecording}
-                  audioUrl={audioUrl}
-                  error={recordingError}
-                />
-              </div>
-            ) : (
-              <div className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-8 text-center">
-                <div className="mb-2 text-3xl">👈</div>
-                <p className="text-slate-600">选择左侧问题开始回答</p>
-              </div>
-            )}
-          </div>
-        </div>
+                <div style={{
+                    marginBottom: 16,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: '#556677',
+                    letterSpacing: '2px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                }}>
+                    <span style={{
+                        width: 6,
+                        height: 6,
+                        background: '#8B7355',
+                        borderRadius: '50%',
+                    }} />
+                    SUPPLEMENTARY QUESTIONS
+                </div>
 
-        {progress.answered === progress.total && progress.total > 0 && (
-          <div className="mt-8 rounded-xl border-2 border-emerald-300 bg-emerald-50 p-6 text-center">
-            <div className="mb-2 text-4xl">🎉</div>
-            <h3 className="mb-2 text-xl font-bold text-emerald-800">全部完成!</h3>
-            <p className="mb-4 text-emerald-700">您已回答所有补充问题，现在可以生成更丰富的传记了</p>
-            <Link
-              href="/main"
-              className="inline-block rounded-lg bg-emerald-500 px-6 py-3 font-semibold text-white shadow transition hover:bg-emerald-600"
-            >
-              返回主页生成传记
-            </Link>
-          </div>
-        )}
+                <div style={{
+                    flex: 1,
+                    overflowY: 'auto',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                    paddingBottom: 40,
+                }}>
+                    {questions.map((q, idx) => {
+                         const isSelected = activeQuestionId === q.id
+                         const isDone = q.status === 'answered'
+                         const isSkipped = q.status === 'skipped'
+
+                         return (
+                            <button
+                                key={q.id}
+                                onClick={() => handleSelectQuestion(q.id)}
+                                style={{
+                                  textAlign: 'left',
+                                  padding: '12px 14px',
+                                  border: isSelected
+                                    ? '1px solid rgba(184,155,114,0.8)'
+                                    : isDone
+                                      ? '1px solid rgba(0, 255, 136, 0.3)'
+                                      : '1px solid rgba(184,155,114,0.1)',
+                                  background: isSelected
+                                    ? 'rgba(184,155,114,0.15)'
+                                    : isDone
+                                      ? 'rgba(0, 255, 136, 0.05)'
+                                      : 'white',
+                                  borderRadius: 4,
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  gap: 12,
+                                  alignItems: 'flex-start',
+                                  transition: 'all 0.2s',
+                                  opacity: isSkipped && !isSelected ? 0.6 : 1,
+                                  boxShadow: isSelected ? '0 0 15px rgba(184,155,114,0.2)' : 'none',
+                                }}
+                            >
+                                <div style={{
+                                  width: 24,
+                                  height: 24,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: 11,
+                                  flexShrink: 0,
+                                  borderRadius: 3,
+                                  border: isDone
+                                    ? '1px solid rgba(0, 255, 136, 0.5)'
+                                    : '1px solid rgba(184,155,114,0.3)',
+                                  background: isDone
+                                    ? 'rgba(0, 255, 136, 0.2)'
+                                    : 'white',
+                                  color: isDone ? '#8B7355' : '#556677',
+                                  fontWeight: 700
+                                }}>
+                                  {isDone ? '✓' : (idx + 1)}
+                                </div>
+
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{
+                                        fontSize: 13,
+                                        color: isSelected ? '#8B7355' : isDone ? '#5A4F43' : '#222',
+                                        fontWeight: 500,
+                                        lineHeight: 1.4,
+                                        marginBottom: 4
+                                    }}>
+                                        {q.question_text}
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                        <QuestionTypeTag type={q.question_type} />
+                                        {isSkipped && <span style={{ fontSize: 10, color: '#999' }}>(已跳过)</span>}
+                                    </div>
+                                </div>
+                            </button>
+                         )
+                    })}
+                    
+                    {questions.length === 0 && (
+                         <div style={{ padding: 20, textAlign: 'center', color: '#999', fontSize: 13 }}>
+                             暂无补充问题
+                         </div>
+                    )}
+                </div>
+            </div>
+
+        </div>
+        
+        {/* Responsive Style */}
+        <style>{`
+            @media (max-width: 1024px) {
+                .two-column-layout {
+                    grid-template-columns: 1fr !important;
+                }
+            }
+        `}</style>
       </div>
     </main>
   )

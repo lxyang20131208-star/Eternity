@@ -41,6 +41,17 @@ export interface Photo {
 }
 
 export interface PhotoMetadata {
+  // 5个核心必填字段（新增）
+  linked_question_id?: string;        // 关联问题ID（必填）
+  time_taken?: string;                // 照片拍摄时间（必填，ISO格式）
+  time_precision?: 'exact' | 'year' | 'month' | 'range' | 'fuzzy';  // 时间精度（必填）
+  place_id?: string;                  // 关联地点ID（必填）
+  caption?: string;                   // 一句话描述（强烈建议）
+
+  // 标注状态
+  annotation_status?: 'incomplete' | 'complete' | 'needs_review';
+  needs_annotation?: boolean;         // 是否需要补全标注
+
   exif?: {
     make?: string;           // 相机品牌
     model?: string;          // 相机型号
@@ -246,4 +257,53 @@ export interface UnsortedStats {
   without_person: number;
   without_place: number;
   last_upload?: string;
+}
+
+// ====================================
+// 照片5字段标注系统（新增）
+// ====================================
+
+export interface PhotoUploadAnnotation {
+  questionId: string;                 // 必填：关联问题
+  peopleIds: string[];                // 必填：人物列表
+  timeTaken: Date | null;             // 必填：拍摄时间
+  timePrecision: 'exact' | 'year' | 'month' | 'range' | 'fuzzy';  // 必填：时间精度
+  placeId: string | null;             // 必填：地点
+  caption: string;                    // 强烈建议：一句话描述
+}
+
+export interface IncompletePhoto {
+  id: string;
+  user_id: string;
+  project_id: string;
+  url: string;
+  caption?: string;
+  created_at: string;
+  missing_field: 'missing_question' | 'missing_people' | 'missing_time' | 'missing_place' | 'missing_caption' | 'complete';
+  completion_percentage: number;      // 0-100
+}
+
+export interface PhotoAnnotationStats {
+  project_id: string;
+  total_photos: number;
+  with_question: number;
+  with_people: number;
+  with_time: number;
+  with_place: number;
+  with_caption: number;
+  complete_photos: number;
+  incomplete_photos: number;
+  completion_rate: number;            // 0-100
+}
+
+export interface PhotoAnnotationReminder {
+  id: string;
+  user_id: string;
+  project_id: string;
+  incomplete_count: number;
+  reminder_type: 'gentle' | 'urgent';
+  last_reminded_at?: string;
+  is_dismissed: boolean;
+  created_at: string;
+  updated_at: string;
 }

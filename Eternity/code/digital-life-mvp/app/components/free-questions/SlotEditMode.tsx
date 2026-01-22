@@ -42,24 +42,24 @@ export function SlotEditMode({ initialText = '', onSave, onCancel }: SlotEditMod
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="写下你想回答的问题..."
-        className="w-full px-3 py-2.5 bg-white/5 border border-cyan-900/50
-                   rounded text-sm text-white placeholder:text-white/30
-                   focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/30
+        className="w-full px-3 py-2.5 bg-white border border-slate-300
+                   rounded text-sm text-slate-900 placeholder:text-slate-400
+                   focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/30
                    transition-colors"
       />
       <div className="flex gap-2 justify-end">
         <button
           onClick={onCancel}
-          className="px-3 py-1.5 text-xs text-white/50 hover:text-white
-                     transition-colors rounded hover:bg-white/5"
+          className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-800
+                     transition-colors rounded hover:bg-slate-100"
         >
           取消
         </button>
         <button
           onClick={handleSave}
           disabled={!text.trim()}
-          className="px-4 py-1.5 text-xs bg-cyan-600 text-white rounded
-                     hover:bg-cyan-500 disabled:opacity-30 disabled:cursor-not-allowed
+          className="px-4 py-1.5 text-xs bg-amber-600 text-white rounded
+                     hover:bg-amber-500 disabled:opacity-30 disabled:cursor-not-allowed
                      transition-colors"
         >
           保存

@@ -4,7 +4,11 @@ import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import PersonCard from '../../components/PersonCard'
 import PeopleGraph from '../../components/PeopleGraph'
+import MergeModal from '../../components/MergeModal'
+import DuplicatesList from '../../components/DuplicatesList'
 import Link from 'next/link'
+import UnifiedNav from '../components/UnifiedNav'
+import { DuplicateGroup } from '@/lib/types/knowledge-graph'
 
 interface Person {
   id: string
@@ -44,6 +48,13 @@ export default function FamilyPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [showRelationshipModal, setShowRelationshipModal] = useState(false)
   const [selectedNodesForRelation, setSelectedNodesForRelation] = useState<string[]>([])
+  const [isApplyingCorrections, setIsApplyingCorrections] = useState(false)
+  const [pendingCorrectionsCount, setPendingCorrectionsCount] = useState(0)
+  const [isDetectingDuplicates, setIsDetectingDuplicates] = useState(false)
+  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([])
+  const [showDuplicatesList, setShowDuplicatesList] = useState(false)
+  const [showMergeModal, setShowMergeModal] = useState(false)
+  const [mergeSourcePerson, setMergeSourcePerson] = useState<Person | null>(null)
 
   const showToast = useCallback((text: string, type: 'success' | 'error' = 'success') => {
     setToast({ text, type })
@@ -146,7 +157,52 @@ export default function FamilyPage() {
     loadData()
   }, [projectId, showToast])
 
-  // 触发人物抽取（同步执行）
+  // 重新加载人物和关系数据（不刷新页面）
+  const reloadData = useCallback(async () => {
+    if (!projectId) return
+
+    try {
+      // 加载人物
+      const peopleRes = await fetch(`/api/people?projectId=${projectId}`)
+      const peopleData = await peopleRes.json()
+
+      if (peopleData.error) throw new Error(peopleData.error)
+
+      // 为每个人物加载照片
+      const peopleWithPhotos = await Promise.all(
+        (peopleData.people || []).map(async (person: Person) => {
+          try {
+            const photosRes = await fetch(
+              `/api/people/photos?personId=${person.id}&projectId=${projectId}`
+            )
+            const photosData = await photosRes.json()
+            return {
+              ...person,
+              photos: photosData.photos || [],
+            }
+          } catch (error) {
+            console.error(`加载人物 ${person.name} 的照片失败:`, error)
+            return person
+          }
+        })
+      )
+
+      setPeople(peopleWithPhotos)
+
+      // 加载关系（保留已有的关系，不会被覆盖）
+      const relRes = await fetch(`/api/people/relationships?projectId=${projectId}`)
+      const relData = await relRes.json()
+
+      if (relData.error) throw new Error(relData.error)
+
+      setRelationships(relData.relationships || [])
+    } catch (error: any) {
+      console.error('重新加载数据失败:', error)
+      showToast('重新加载数据失败', 'error')
+    }
+  }, [projectId, showToast])
+
+  // 触发人物抽取（同步执行，增量更新，不会删除已有人物和关系）
   const handleExtractPeople = async () => {
     if (!projectId || isExtracting) return
 
@@ -154,7 +210,7 @@ export default function FamilyPage() {
 
     try {
       console.log('[Family] Starting people extraction for project:', projectId)
-      showToast('正在抽取人物，请稍候...', 'success')
+      showToast('正在抽取人物，请稍候...（已有编辑不会丢失）', 'success')
 
       const res = await fetch('/api/people/extract', {
         method: 'POST',
@@ -181,9 +237,9 @@ export default function FamilyPage() {
       } else if (newPeople === 0 && updatedPeople === 0) {
         showToast('没有找到新人物', 'error')
       } else {
-        showToast(`抽取完成！新增 ${newPeople} 人，更新 ${updatedPeople} 人`, 'success')
-        // 延迟刷新页面
-        setTimeout(() => window.location.reload(), 1500)
+        showToast(`抽取完成！新增 ${newPeople} 人，更新 ${updatedPeople} 人。已有的人物编辑和关系已保留。`, 'success')
+        // 增量更新：重新加载数据，不刷新页面，保留用户的所有编辑
+        await reloadData()
       }
     } catch (error: any) {
       console.error('[Family] 人物抽取失败:', error)
@@ -224,6 +280,64 @@ export default function FamilyPage() {
     }
   }
 
+  // 加载待应用的名字修正数量
+  const loadPendingCorrectionsCount = useCallback(async () => {
+    if (!projectId) return
+
+    try {
+      const res = await fetch(`/api/people/name-corrections?projectId=${projectId}`)
+      const data = await res.json()
+      if (data.corrections) {
+        setPendingCorrectionsCount(data.corrections.length)
+      }
+    } catch (error) {
+      console.error('加载名字修正数量失败:', error)
+    }
+  }, [projectId])
+
+  // 在页面加载时获取修正数量
+  useEffect(() => {
+    if (projectId) {
+      loadPendingCorrectionsCount()
+    }
+  }, [projectId, loadPendingCorrectionsCount])
+
+  // 应用名字修正到提纲
+  const handleApplyCorrectionsToOutline = async () => {
+    if (!projectId || isApplyingCorrections) return
+
+    setIsApplyingCorrections(true)
+
+    try {
+      const res = await fetch('/api/people/apply-corrections-to-outline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId }),
+      })
+
+      const data = await res.json()
+
+      if (!data.success) {
+        throw new Error(data.error || '应用失败')
+      }
+
+      showToast(data.message, 'success')
+
+      // 如果有应用的修正，显示详细信息
+      if (data.corrections && data.corrections.length > 0) {
+        const details = data.corrections
+          .map((c: { oldName: string; newName: string; count: number }) => `${c.oldName}→${c.newName}(${c.count}处)`)
+          .join('、')
+        console.log('[Family] Applied corrections:', details)
+      }
+    } catch (error: any) {
+      console.error('应用名字修正失败:', error)
+      showToast('应用失败: ' + error.message, 'error')
+    } finally {
+      setIsApplyingCorrections(false)
+    }
+  }
+
   // 更新人物信息
   const handleUpdatePerson = async (personId: string, updates: Partial<Person>) => {
     try {
@@ -254,9 +368,11 @@ export default function FamilyPage() {
 
       if (isNameChanged) {
         showToast(
-          `姓名已修改：${person.name} → ${updates.name}。请前往 Export 页面进行全局替换。`,
+          `姓名已修改：${person.name} → ${updates.name}。可点击"应用到提纲"按钮更新传记大纲。`,
           'success'
         )
+        // 刷新待应用的修正数量
+        loadPendingCorrectionsCount()
       }
     } catch (error: any) {
       console.error('更新人物失败:', error)
@@ -282,6 +398,62 @@ export default function FamilyPage() {
       console.error('删除人物失败:', error)
       showToast('删除失败: ' + error.message, 'error')
     }
+  }
+
+  // 检测重复人物
+  const handleDetectDuplicates = async () => {
+    if (!projectId || isDetectingDuplicates) return
+
+    setIsDetectingDuplicates(true)
+
+    try {
+      console.log('[Family] Detecting duplicates for project:', projectId)
+
+      const res = await fetch('/api/people/detect-duplicates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId }),
+      })
+
+      const data = await res.json()
+
+      if (!data.success) {
+        throw new Error(data.error || 'Detection failed')
+      }
+
+      setDuplicateGroups(data.duplicateGroups || [])
+
+      if (data.totalDuplicates > 0) {
+        setShowDuplicatesList(true)
+        showToast(`发现 ${data.totalDuplicates} 组可能重复的人物`, 'success')
+      } else {
+        showToast('没有发现重复的人物', 'success')
+      }
+    } catch (error: any) {
+      console.error('[Family] 检测重复人物失败:', error)
+      showToast('检测失败: ' + error.message, 'error')
+    } finally {
+      setIsDetectingDuplicates(false)
+    }
+  }
+
+  // 打开合并模态框
+  const handleOpenMergeModal = (person: Person) => {
+    setMergeSourcePerson(person)
+    setShowMergeModal(true)
+  }
+
+  // 从重复列表触发合并
+  const handleMergeFromDuplicates = (primaryPerson: Person, secondaryPerson: Person) => {
+    setMergeSourcePerson(primaryPerson)
+    setShowDuplicatesList(false)
+    setShowMergeModal(true)
+  }
+
+  // 合并成功后的处理
+  const handleMergeSuccess = async () => {
+    showToast('人物合并成功！', 'success')
+    await reloadData()
   }
 
   // 添加关系
@@ -333,32 +505,32 @@ export default function FamilyPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 p-6">
-      <div className="max-w-[1600px] mx-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
+    <main 
+      className="min-h-screen bg-[#F7F5F2]"
+      style={{ padding: '24px 16px', fontFamily: '"Source Han Serif SC", "Songti SC", "SimSun", serif' }}
+    >
+      <div style={{ maxWidth: 1400, margin: '0 auto', padding: '0 4px' }}>
+        <UnifiedNav />
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <div className="inline-block px-3 py-1 bg-purple-500/20 text-purple-700 dark:text-purple-300 rounded-full text-xs font-semibold mb-2">
-                FAMILY HOME
-              </div>
-              <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">
+              <h1 className="text-3xl font-bold text-[#2C2C2C]">
                 家庭人物空间
               </h1>
-              <p className="text-gray-600 dark:text-gray-400">
+              <p className="text-[#666666] mt-1">
                 从你的传记大纲中自动识别你提到过的人，帮你整理成家庭/人物关系网。
               </p>
             </div>
-            <div className="flex gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
               <button
                 onClick={handleExtractPeople}
                 disabled={isExtracting}
-                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-5 py-2.5 bg-[#2C2C2C] hover:bg-[#404040] text-white rounded-xl transition-all duration-200 font-medium flex items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isExtracting ? (
                   <>
                     <svg
-                      className="animate-spin h-4 w-4"
+                      className="animate-spin h-5 w-5"
                       fill="none"
                       viewBox="0 0 24 24"
                     >
@@ -381,7 +553,7 @@ export default function FamilyPage() {
                 ) : (
                   <>
                     <svg
-                      className="w-4 h-4"
+                      className="w-5 h-5"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -400,12 +572,12 @@ export default function FamilyPage() {
               <button
                 onClick={handleRefreshPhotos}
                 disabled={isRefreshingPhotos}
-                className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-5 py-2.5 bg-white border border-[#E5E5E0] text-[#2C2C2C] rounded-xl hover:bg-[#F5F5F0] transition-all duration-200 font-medium flex items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isRefreshingPhotos ? (
                   <>
                     <svg
-                      className="animate-spin h-4 w-4"
+                      className="animate-spin h-5 w-5"
                       fill="none"
                       viewBox="0 0 24 24"
                     >
@@ -428,7 +600,7 @@ export default function FamilyPage() {
                 ) : (
                   <>
                     <svg
-                      className="w-4 h-4"
+                      className="w-5 h-5"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -444,40 +616,130 @@ export default function FamilyPage() {
                   </>
                 )}
               </button>
-              <Link
-                href="/main"
-                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+              {pendingCorrectionsCount > 0 && (
+                <button
+                  onClick={handleApplyCorrectionsToOutline}
+                  disabled={isApplyingCorrections}
+                  className="px-5 py-2.5 bg-[#2E7D32] hover:bg-[#1B5E20] text-white rounded-xl transition-all duration-200 font-medium flex items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isApplyingCorrections ? (
+                    <>
+                      <svg
+                        className="animate-spin h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      <span>应用中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                      <span>应用到提纲 ({pendingCorrectionsCount})</span>
+                    </>
+                  )}
+                </button>
+              )}
+              <button
+                onClick={handleDetectDuplicates}
+                disabled={isDetectingDuplicates || people.length === 0}
+                className="px-5 py-2.5 bg-[#D32F2F] hover:bg-[#B71C1C] text-white rounded-xl transition-all duration-200 font-medium flex items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                返回主页
-              </Link>
+                {isDetectingDuplicates ? (
+                  <>
+                    <svg
+                      className="animate-spin h-5 w-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    <span>检测中...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                      />
+                    </svg>
+                    <span>检测重复</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
 
           {/* Stats Bar */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mt-6">
+            <div className="bg-white rounded-lg p-4 shadow-sm border border-[#E5E5E0]">
+              <div className="text-2xl font-bold text-[#2C2C2C]">
                 {stats.total}
               </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">总人物</div>
+              <div className="text-sm text-[#666666]">总人物</div>
             </div>
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
-              <div className="text-2xl font-bold text-green-600">{stats.confirmed}</div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">已确认</div>
+            <div className="bg-white rounded-lg p-4 shadow-sm border border-[#E5E5E0]">
+              <div className="text-2xl font-bold text-[#2E7D32]">{stats.confirmed}</div>
+              <div className="text-sm text-[#666666]">已确认</div>
             </div>
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
-              <div className="text-2xl font-bold text-yellow-600">{stats.pending}</div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">待确认</div>
+            <div className="bg-white rounded-lg p-4 shadow-sm border border-[#E5E5E0]">
+              <div className="text-2xl font-bold text-[#F9A825]">{stats.pending}</div>
+              <div className="text-sm text-[#666666]">待确认</div>
             </div>
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
-              <div className="text-2xl font-bold text-blue-600">
+            <div className="bg-white rounded-lg p-4 shadow-sm border border-[#E5E5E0]">
+              <div className="text-2xl font-bold text-[#1565C0]">
                 {stats.totalRelationships}
               </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">关系数</div>
+              <div className="text-sm text-[#666666]">关系数</div>
             </div>
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
-              <div className="text-2xl font-bold text-purple-600">{stats.totalPhotos}</div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">关联照片</div>
+            <div className="bg-white rounded-lg p-4 shadow-sm border border-[#E5E5E0]">
+              <div className="text-2xl font-bold text-[#6A1B9A]">{stats.totalPhotos}</div>
+              <div className="text-sm text-[#666666]">关联照片</div>
             </div>
           </div>
 
@@ -542,7 +804,16 @@ export default function FamilyPage() {
             </button>
           </div>
         ) : (
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 relative">
+            <button
+              onClick={() => window.location.reload()}
+              className="absolute top-6 right-6 z-10 px-3 py-1.5 bg-white border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors flex items-center gap-2 shadow-sm"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              刷新页面生效编辑
+            </button>
             <PeopleGraph
               people={people}
               relationships={relationships}
@@ -560,6 +831,7 @@ export default function FamilyPage() {
           onUpdate={handleUpdatePerson}
           onDelete={handleDeletePerson}
           onClose={() => setSelectedPerson(null)}
+          onMerge={handleOpenMergeModal}
         />
       )}
 
@@ -574,6 +846,30 @@ export default function FamilyPage() {
             setSelectedNodesForRelation([])
           }}
           onCreate={handleCreateRelationship}
+        />
+      )}
+
+      {/* Merge Modal */}
+      {showMergeModal && mergeSourcePerson && projectId && (
+        <MergeModal
+          isOpen={showMergeModal}
+          onClose={() => setShowMergeModal(false)}
+          sourcePerson={mergeSourcePerson as any}
+          allPeople={people as any}
+          projectId={projectId}
+          onMergeSuccess={handleMergeSuccess}
+        />
+      )}
+
+      {/* Duplicates List */}
+      {showDuplicatesList && projectId && (
+        <DuplicatesList
+          isOpen={showDuplicatesList}
+          onClose={() => setShowDuplicatesList(false)}
+          duplicateGroups={duplicateGroups}
+          allPeople={people as any}
+          projectId={projectId}
+          onMerge={handleMergeFromDuplicates as any}
         />
       )}
 

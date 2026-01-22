@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
+import UnifiedNav from '../components/UnifiedNav';
 import { listProjectOutlines, BiographyOutline } from '@/lib/biographyOutlineApi';
 import { richContentToText } from '@/lib/types/outline';
 import type { RichTextContent } from '@/lib/types/outline';
@@ -1175,51 +1176,40 @@ export default function ExportPage() {
           }
         }
       `}</style>
-      <div className="detroit-bg" style={{ minHeight: '100vh', padding: 20, color: 'var(--text-primary)' }}>
-      {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 24,
-        }}
+      <div 
+        className="min-h-screen bg-[#F7F5F2]"
+        style={{ padding: '24px 16px', fontFamily: '"Source Han Serif SC", "Songti SC", "SimSun", serif', color: '#2C2C2C' }}
       >
-        <div>
-          <h1 style={{ fontSize: 26, fontWeight: 600, marginBottom: 6 }}>
-            📖 电子书导出引擎
-          </h1>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-            Inspired by Bookwright & Affinity Publisher
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <Link
-            href="/outline-annotate"
-            className="cyber-btn"
-            style={{
-              padding: '8px 14px',
-              fontSize: 12,
-              borderRadius: 4,
-              textDecoration: 'none',
-            }}
-          >
-            ← 返回审阅大纲
-          </Link>
-          <Link
-            href="/main"
-            className="cyber-btn"
-            style={{
-              padding: '8px 14px',
-              fontSize: 12,
-              borderRadius: 4,
-              textDecoration: 'none',
-            }}
-          >
-            ← 主页
-          </Link>
-        </div>
-      </div>
+        <div style={{ maxWidth: 1400, margin: '0 auto' }}>
+          <UnifiedNav />
+          
+          {/* Header */}
+          <div className="w-full px-4 py-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-3xl font-bold text-[#2C2C2C]">
+                  电子书导出引擎
+                </h1>
+                <p className="text-[#666666] mt-1">
+                  Inspired by Bookwright & Affinity Publisher
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <Link
+                  href="/outline-annotate"
+                  className="px-5 py-2.5 bg-white border border-[#E5E5E0] hover:bg-[#F5F5F0] text-[#2C2C2C] rounded-xl transition-all duration-200 font-medium shadow-sm flex items-center gap-2"
+                >
+                  ← 返回审阅大纲
+                </Link>
+                <Link
+                  href="/main"
+                  className="px-5 py-2.5 bg-white border border-[#E5E5E0] hover:bg-[#F5F5F0] text-[#2C2C2C] rounded-xl transition-all duration-200 font-medium shadow-sm flex items-center gap-2"
+                >
+                  ← 主页
+                </Link>
+              </div>
+            </div>
+          </div>
 
       {/* Main Layout */}
       <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr 320px', gap: 20 }}>
@@ -1307,12 +1297,12 @@ export default function ExportPage() {
               style={{
                 marginTop: 16,
                 padding: 12,
-                background: 'rgba(34, 197, 94, 0.08)',
-                border: '1px solid rgba(34, 197, 94, 0.2)',
+                background: 'rgba(95, 111, 82, 0.08)',
+                border: '1px solid rgba(95, 111, 82, 0.2)',
                 borderRadius: 6,
               }}
             >
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#22c55e', marginBottom: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#5F6F52', marginBottom: 10 }}>
                 📥 已生成的 PDF
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1321,15 +1311,16 @@ export default function ExportPage() {
                     key={pdf.id}
                     style={{
                       padding: '8px 10px',
-                      background: 'rgba(0, 0, 0, 0.2)',
+                      background: 'rgba(255, 255, 255, 0.5)',
                       borderRadius: 4,
                       fontSize: 10,
+                      border: '1px solid rgba(95, 111, 82, 0.1)',
                     }}
                   >
-                    <div style={{ color: '#fff', marginBottom: 4, fontWeight: 500 }}>
+                    <div style={{ color: '#3B2F23', marginBottom: 4, fontWeight: 500 }}>
                       v{pdf.version} · {pdf.template}
                     </div>
-                    <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}>
+                    <div style={{ color: '#8C8377', marginBottom: 6 }}>
                       {new Date(pdf.createdAt).toLocaleString()}
                     </div>
                     <a
@@ -1339,19 +1330,19 @@ export default function ExportPage() {
                       style={{
                         display: 'inline-block',
                         padding: '4px 8px',
-                        background: 'rgba(34, 197, 94, 0.2)',
-                        border: '1px solid rgba(34, 197, 94, 0.4)',
+                        background: 'rgba(95, 111, 82, 0.1)',
+                        border: '1px solid rgba(95, 111, 82, 0.3)',
                         borderRadius: 4,
-                        color: '#22c55e',
+                        color: '#5F6F52',
                         fontSize: 10,
                         textDecoration: 'none',
                         transition: 'all 0.2s',
                       }}
                       onMouseEnter={(e) => {
-                        e.currentTarget.style.background = 'rgba(34, 197, 94, 0.3)';
+                        e.currentTarget.style.background = 'rgba(95, 111, 82, 0.2)';
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.background = 'rgba(34, 197, 94, 0.2)';
+                        e.currentTarget.style.background = 'rgba(95, 111, 82, 0.1)';
                       }}
                     >
                       下载 PDF ↓
@@ -1384,14 +1375,14 @@ export default function ExportPage() {
           {/* Stats Card */}
           <div
             style={{
-              background: 'rgba(0, 212, 255, 0.05)',
-              border: '1px solid rgba(0, 212, 255, 0.2)',
+              background: 'rgba(184,155,114,0.05)',
+              border: '1px solid rgba(184,155,114,0.2)',
               borderRadius: 8,
               padding: 16,
               marginBottom: 24,
             }}
           >
-            <h4 style={{ fontSize: 14, marginBottom: 12, color: '#00d4ff' }}>
+            <h4 style={{ fontSize: 14, marginBottom: 12, color: '#8B7355' }}>
               📊 内容统计
             </h4>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
@@ -1399,7 +1390,7 @@ export default function ExportPage() {
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                   章节数量
                 </div>
-                <div style={{ fontSize: 20, fontWeight: 600, color: '#00d4ff' }}>
+                <div style={{ fontSize: 20, fontWeight: 600, color: '#B89B72' }}>
                   {stats.sectionCount}
                 </div>
               </div>
@@ -1407,7 +1398,7 @@ export default function ExportPage() {
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                   照片数量
                 </div>
-                <div style={{ fontSize: 20, fontWeight: 600, color: '#00d4ff' }}>
+                <div style={{ fontSize: 20, fontWeight: 600, color: '#B89B72' }}>
                   {stats.photoCount}
                 </div>
               </div>
@@ -1415,7 +1406,7 @@ export default function ExportPage() {
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                   家族成员
                 </div>
-                <div style={{ fontSize: 20, fontWeight: 600, color: '#00d4ff' }}>
+                <div style={{ fontSize: 20, fontWeight: 600, color: '#B89B72' }}>
                   {stats.memberCount}
                 </div>
               </div>
@@ -1423,7 +1414,7 @@ export default function ExportPage() {
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                   照片标注
                 </div>
-                <div style={{ fontSize: 20, fontWeight: 600, color: '#00d4ff' }}>
+                <div style={{ fontSize: 20, fontWeight: 600, color: '#B89B72' }}>
                   {stats.attachmentCount}
                 </div>
               </div>
@@ -1434,17 +1425,17 @@ export default function ExportPage() {
           <div
             style={{
               background: expandedChapters
-                ? 'rgba(34, 197, 94, 0.1)'
-                : 'rgba(251, 191, 36, 0.1)',
+                ? 'rgba(95, 111, 82, 0.1)'
+                : 'rgba(201, 160, 99, 0.1)',
               border: expandedChapters
-                ? '1px solid rgba(34, 197, 94, 0.3)'
-                : '1px solid rgba(251, 191, 36, 0.3)',
+                ? '1px solid rgba(95, 111, 82, 0.3)'
+                : '1px solid rgba(201, 160, 99, 0.3)',
               borderRadius: 8,
               padding: 16,
               marginBottom: 24,
             }}
           >
-            <h4 style={{ fontSize: 14, marginBottom: 12, color: expandedChapters ? '#22c55e' : '#fbbf24' }}>
+            <h4 style={{ fontSize: 14, marginBottom: 12, color: expandedChapters ? '#5F6F52' : '#C9A063' }}>
               {expandedChapters ? '✅ 完整传记已生成' : '📝 生成完整传记文本'}
             </h4>
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>
@@ -1494,8 +1485,8 @@ export default function ExportPage() {
                 background: expanding
                   ? 'rgba(31, 31, 31, 0.06)'
                   : expandedChapters
-                    ? 'linear-gradient(135deg, #22c55e, #16a34a)'
-                    : 'linear-gradient(135deg, #fbbf24, #f59e0b)',
+                    ? 'linear-gradient(135deg, #5F6F52, #4A5D23)'
+                    : 'linear-gradient(135deg, #C9A063, #A67C00)',
                 color: '#fff',
                 cursor: expanding || !selectedOutline ? 'not-allowed' : 'pointer',
                 opacity: expanding || !selectedOutline ? 0.6 : 1,
@@ -1660,14 +1651,14 @@ export default function ExportPage() {
                         padding: '10px 6px',
                         background:
                           printPreset === preset
-                            ? 'rgba(139, 92, 246, 0.15)'
+                            ? 'rgba(139, 115, 85, 0.15)'
                             : 'var(--card)',
                         border:
                           printPreset === preset
-                            ? '1px solid rgba(139, 92, 246, 0.5)'
+                            ? '1px solid rgba(139, 115, 85, 0.5)'
                             : '1px solid var(--border)',
                         borderRadius: 6,
-                        color: printPreset === preset ? '#a78bfa' : 'var(--text-primary)',
+                        color: printPreset === preset ? '#8B7355' : 'var(--text-primary)',
                         fontSize: 11,
                         cursor: 'pointer',
                         transition: 'all 0.2s',
@@ -1689,8 +1680,8 @@ export default function ExportPage() {
                 style={{
                   marginTop: 10,
                   padding: 10,
-                  background: 'rgba(139, 92, 246, 0.08)',
-                  border: '1px solid rgba(139, 92, 246, 0.2)',
+                  background: 'rgba(139, 115, 85, 0.08)',
+                  border: '1px solid rgba(139, 115, 85, 0.2)',
                   borderRadius: 6,
                   fontSize: 10,
                     color: 'var(--text-secondary)',
@@ -1705,10 +1696,10 @@ export default function ExportPage() {
                   style={{
                     marginTop: 8,
                     padding: '6px 10px',
-                    background: 'rgba(139, 92, 246, 0.2)',
-                    border: '1px solid rgba(139, 92, 246, 0.4)',
+                    background: 'rgba(139, 115, 85, 0.2)',
+                    border: '1px solid rgba(139, 115, 85, 0.4)',
                     borderRadius: 4,
-                    color: '#a78bfa',
+                    color: '#8B7355',
                     fontSize: 10,
                     cursor: 'pointer',
                   }}
@@ -1730,10 +1721,10 @@ export default function ExportPage() {
                   onClick={() => setExportEngine('vivliostyle')}
                   style={{
                     padding: '12px 10px',
-                    background: exportEngine === 'vivliostyle' ? 'rgba(16, 185, 129, 0.15)' : 'var(--card)',
-                    border: exportEngine === 'vivliostyle' ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid var(--border)',
+                    background: exportEngine === 'vivliostyle' ? 'rgba(95, 111, 82, 0.15)' : 'var(--card)',
+                    border: exportEngine === 'vivliostyle' ? '1px solid rgba(95, 111, 82, 0.5)' : '1px solid var(--border)',
                     borderRadius: 6,
-                    color: exportEngine === 'vivliostyle' ? '#10b981' : 'var(--text-primary)',
+                    color: exportEngine === 'vivliostyle' ? '#5F6F52' : 'var(--text-primary)',
                     fontSize: 12,
                     cursor: 'pointer',
                     textAlign: 'left',
@@ -1748,10 +1739,10 @@ export default function ExportPage() {
                   onClick={() => setExportEngine('html2canvas')}
                   style={{
                     padding: '12px 10px',
-                    background: exportEngine === 'html2canvas' ? 'rgba(59, 130, 246, 0.15)' : 'var(--card)',
-                    border: exportEngine === 'html2canvas' ? '1px solid rgba(59, 130, 246, 0.5)' : '1px solid var(--border)',
+                    background: exportEngine === 'html2canvas' ? 'rgba(139, 115, 85, 0.15)' : 'var(--card)',
+                    border: exportEngine === 'html2canvas' ? '1px solid rgba(139, 115, 85, 0.5)' : '1px solid var(--border)',
                     borderRadius: 6,
-                    color: exportEngine === 'html2canvas' ? '#3b82f6' : 'var(--text-primary)',
+                    color: exportEngine === 'html2canvas' ? '#8B7355' : 'var(--text-primary)',
                     fontSize: 12,
                     cursor: 'pointer',
                     textAlign: 'left',
@@ -1834,10 +1825,10 @@ export default function ExportPage() {
                             style={{
                               flex: 1,
                               padding: '6px 8px',
-                              background: photoSize === size ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg)',
-                              border: photoSize === size ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid var(--border)',
+                              background: photoSize === size ? 'rgba(95, 111, 82, 0.15)' : 'var(--bg)',
+                              border: photoSize === size ? '1px solid rgba(95, 111, 82, 0.5)' : '1px solid var(--border)',
                               borderRadius: 4,
-                              color: photoSize === size ? '#10b981' : 'var(--text-primary)',
+                              color: photoSize === size ? '#5F6F52' : 'var(--text-primary)',
                               fontSize: 11,
                               cursor: 'pointer',
                             }}
@@ -1876,7 +1867,7 @@ export default function ExportPage() {
               }}
               onFocus={(e) => {
                 e.target.style.background = 'var(--card)';
-                e.target.style.borderColor = 'rgba(0, 212, 255, 0.5)';
+                e.target.style.borderColor = '#B89B72';
               }}
               onBlur={(e) => {
                 e.target.style.background = 'var(--card)';
@@ -1894,7 +1885,7 @@ export default function ExportPage() {
                   padding: '6px 12px',
                   background: generatingTitle 
                     ? 'rgba(31, 31, 31, 0.06)' 
-                    : 'linear-gradient(135deg, #667eea, #764ba2)',
+                    : 'linear-gradient(135deg, #B89B72, #8B7355)',
                   border: 'none',
                   borderRadius: 4,
                   color: '#fff',
@@ -1910,7 +1901,7 @@ export default function ExportPage() {
                 onMouseEnter={(e) => {
                   if (!generatingTitle && selectedOutline) {
                     e.currentTarget.style.transform = 'translateY(-1px)';
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.4)';
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(184, 155, 114, 0.4)';
                   }
                 }}
                 onMouseLeave={(e) => {
@@ -1937,13 +1928,13 @@ export default function ExportPage() {
                 style={{
                   marginTop: 12,
                   padding: 12,
-                  background: 'rgba(102, 126, 234, 0.08)',
-                  border: '1px solid rgba(102, 126, 234, 0.2)',
+                  background: 'rgba(184,155,114,0.08)',
+                  border: '1px solid rgba(184,155,114,0.2)',
                   borderRadius: 6,
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: '#a5b4fc' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#B89B72' }}>
                     💡 AI推荐书名
                   </span>
                   <button
@@ -1981,8 +1972,8 @@ export default function ExportPage() {
                         transition: 'all 0.2s',
                       }}
                       onMouseEnter={(e) => {
-                        e.currentTarget.style.background = 'rgba(102, 126, 234, 0.15)';
-                        e.currentTarget.style.borderColor = 'rgba(102, 126, 234, 0.4)';
+                        e.currentTarget.style.background = 'rgba(184,155,114,0.15)';
+                        e.currentTarget.style.borderColor = 'rgba(184,155,114,0.4)';
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.background = 'rgba(31, 31, 31, 0.05)';
@@ -2024,7 +2015,7 @@ export default function ExportPage() {
                 transition: 'all 0.2s',
               }}
               onFocus={(e) => {
-                e.target.style.borderColor = 'rgba(0, 212, 255, 0.5)';
+                e.target.style.borderColor = '#B89B72';
               }}
               onBlur={(e) => {
                 e.target.style.borderColor = 'var(--border)';
@@ -2071,7 +2062,7 @@ export default function ExportPage() {
                     width: 16,
                     height: 16,
                     marginRight: 10,
-                    accentColor: '#00d4ff',
+                    accentColor: '#B89B72',
                   }}
                 />
                 {label}
@@ -2084,15 +2075,8 @@ export default function ExportPage() {
             <button
               onClick={() => setShowPreview(true)}
               disabled={!selectedOutline}
+              className="px-5 py-3.5 bg-white border border-[#E5E5E0] hover:bg-[#F5F5F0] text-[#2C2C2C] rounded-xl transition-all duration-200 font-medium shadow-sm flex-1 flex items-center justify-center gap-2"
               style={{
-                flex: 1,
-                padding: '14px 20px',
-                fontSize: 15,
-                borderRadius: 6,
-                fontWeight: 600,
-                background: 'rgba(124, 58, 237, 0.2)',
-                border: '1px solid rgba(124, 58, 237, 0.4)',
-                color: '#c084fc',
                 opacity: !selectedOutline ? 0.5 : 1,
                 cursor: !selectedOutline ? 'not-allowed' : 'pointer',
               }}
@@ -2102,13 +2086,8 @@ export default function ExportPage() {
             <button
               onClick={handleExport}
               disabled={exporting || !selectedOutline}
-              className="cyber-btn cyber-btn-primary"
+              className="px-5 py-3.5 bg-[#B89B72] hover:bg-[#A89070] text-white rounded-xl transition-all duration-200 font-medium shadow-sm flex-1 flex items-center justify-center gap-2"
               style={{
-                flex: 1,
-                padding: '14px 20px',
-                fontSize: 15,
-                borderRadius: 6,
-                fontWeight: 600,
                 opacity: exporting || !selectedOutline ? 0.5 : 1,
                 cursor: exporting || !selectedOutline ? 'not-allowed' : 'pointer',
               }}
@@ -2133,7 +2112,7 @@ export default function ExportPage() {
                   style={{
                     width: `${progress}%`,
                     height: '100%',
-                    background: 'linear-gradient(90deg, #00d4ff, #0099ff)',
+                    background: 'linear-gradient(90deg, #B89B72, #8B7355)',
                     transition: 'width 0.3s',
                   }}
                 />
@@ -2153,36 +2132,36 @@ export default function ExportPage() {
         </div>
 
         {/* Right: Preview */}
-        <div
-          style={{
-            background: 'var(--card)',
-            border: '1px solid var(--border)',
-            borderRadius: 8,
-            padding: 16,
-            maxHeight: '80vh',
-            overflowY: 'auto',
-          }}
-        >
-          <h3 style={{ fontSize: 14, marginBottom: 12, color: '#00d4ff' }}>
-            📄 预览信息
-          </h3>
-          {selectedOutline ? (
-            <div>
-              <div
-                style={{
-                  fontSize: 13,
-                  padding: '8px 10px',
-                  background: 'var(--card)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 6,
-                  marginBottom: 12,
-                }}
-              >
-                <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-                  版本
+          <div
+            style={{
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              padding: 16,
+              maxHeight: '80vh',
+              overflowY: 'auto',
+            }}
+          >
+            <h3 style={{ fontSize: 14, marginBottom: 12, color: '#B89B72' }}>
+              📄 预览信息
+            </h3>
+            {selectedOutline ? (
+              <div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    padding: '8px 10px',
+                    background: 'var(--card)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    marginBottom: 12,
+                  }}
+                >
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+                    版本
+                  </div>
+                  <div style={{ fontWeight: 600 }}>{selectedOutline.version}</div>
                 </div>
-                <div style={{ fontWeight: 600 }}>{selectedOutline.version}</div>
-              </div>
 
               <div
                 style={{
@@ -2634,21 +2613,21 @@ export default function ExportPage() {
                     style={{
                       padding: 16,
                       background: report.passed
-                        ? 'rgba(34, 197, 94, 0.1)'
-                        : 'rgba(251, 191, 36, 0.1)',
-                      border: `1px solid ${report.passed ? 'rgba(34, 197, 94, 0.3)' : 'rgba(251, 191, 36, 0.3)'}`,
+                        ? 'rgba(95, 111, 82, 0.1)'
+                        : 'rgba(201, 160, 99, 0.1)',
+                      border: `1px solid ${report.passed ? 'rgba(95, 111, 82, 0.3)' : 'rgba(201, 160, 99, 0.3)'}`,
                       borderRadius: 8,
                       marginBottom: 20,
                     }}
                   >
-                    <div style={{ fontSize: 16, fontWeight: 600, color: report.passed ? '#22c55e' : '#fbbf24' }}>
+                    <div style={{ fontSize: 16, fontWeight: 600, color: report.passed ? '#5F6F52' : '#C9A063' }}>
                       {report.passed ? '✅ 可以提交印刷厂' : '⚠️  有建议优化项'}
                     </div>
                   </div>
 
                   {/* Info */}
                   <div style={{ marginBottom: 20 }}>
-                    <h3 style={{ fontSize: 14, marginBottom: 12, color: '#a78bfa' }}>基本信息</h3>
+                    <h3 style={{ fontSize: 14, marginBottom: 12, color: '#B89B72' }}>基本信息</h3>
                     <div style={{ background: 'var(--card)', padding: 12, borderRadius: 6, fontSize: 12 }}>
                       <div style={{ marginBottom: 6 }}>📏 页面尺寸：{report.info.pageSize}</div>
                       <div style={{ marginBottom: 6 }}>📄 总页数：{report.info.totalPages} 页</div>
@@ -2661,13 +2640,13 @@ export default function ExportPage() {
                   {/* Errors */}
                   {report.errors.length > 0 && (
                     <div style={{ marginBottom: 20 }}>
-                      <h3 style={{ fontSize: 14, marginBottom: 12, color: '#ef4444' }}>❌ 错误</h3>
+                      <h3 style={{ fontSize: 14, marginBottom: 12, color: '#C97A63' }}>❌ 错误</h3>
                       {report.errors.map((err, idx) => (
                         <div
                           key={idx}
                           style={{
-                            background: 'rgba(239, 68, 68, 0.1)',
-                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                            background: 'rgba(201, 122, 99, 0.1)',
+                            border: '1px solid rgba(201, 122, 99, 0.3)',
                             padding: 10,
                             borderRadius: 6,
                             marginBottom: 8,
@@ -2683,13 +2662,13 @@ export default function ExportPage() {
                   {/* Warnings */}
                   {report.warnings.length > 0 && (
                     <div style={{ marginBottom: 20 }}>
-                      <h3 style={{ fontSize: 14, marginBottom: 12, color: '#fbbf24' }}>⚠️  建议优化</h3>
+                      <h3 style={{ fontSize: 14, marginBottom: 12, color: '#C9A063' }}>⚠️  建议优化</h3>
                       {report.warnings.map((warn, idx) => (
                         <div
                           key={idx}
                           style={{
-                            background: 'rgba(251, 191, 36, 0.1)',
-                            border: '1px solid rgba(251, 191, 36, 0.3)',
+                            background: 'rgba(201, 160, 99, 0.1)',
+                            border: '1px solid rgba(201, 160, 99, 0.3)',
                             padding: 10,
                             borderRadius: 6,
                             marginBottom: 8,
@@ -2706,8 +2685,8 @@ export default function ExportPage() {
                   <div
                     style={{
                       padding: 12,
-                      background: 'rgba(99, 102, 241, 0.1)',
-                      border: '1px solid rgba(99, 102, 241, 0.3)',
+                      background: 'rgba(139, 115, 85, 0.1)',
+                      border: '1px solid rgba(139, 115, 85, 0.3)',
                       borderRadius: 6,
                       fontSize: 11,
                       color: 'var(--text-secondary)',
@@ -2724,10 +2703,10 @@ export default function ExportPage() {
                       style={{
                         flex: 1,
                         padding: '10px 16px',
-                        background: 'rgba(139, 92, 246, 0.2)',
-                        border: '1px solid rgba(139, 92, 246, 0.4)',
+                        background: 'rgba(139, 115, 85, 0.2)',
+                        border: '1px solid rgba(139, 115, 85, 0.4)',
                         borderRadius: 6,
-                        color: '#a78bfa',
+                        color: '#B89B72',
                         fontSize: 13,
                         cursor: 'pointer',
                       }}
@@ -2742,7 +2721,7 @@ export default function ExportPage() {
                       style={{
                         flex: 1,
                         padding: '10px 16px',
-                        background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+                        background: 'linear-gradient(135deg, #5F6F52, #4A5D23)',
                         border: 'none',
                         borderRadius: 6,
                         color: '#fff',
@@ -2760,6 +2739,7 @@ export default function ExportPage() {
           </div>
         </div>
       )}
+        </div>
       </div>
     </>
   );
