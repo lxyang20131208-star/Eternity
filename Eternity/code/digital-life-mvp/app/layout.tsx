@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "leaflet/dist/leaflet.css";
+import AuthErrorHandler from "./components/AuthErrorHandler";
 
 export const metadata: Metadata = {
   title: "永恒档案 - EverArchive",
@@ -23,6 +24,7 @@ export default function RootLayout({
         />
       </head>
       <body className={`antialiased`}>
+        <AuthErrorHandler />
         {children}
       </body>
     </html>

@@ -14,8 +14,9 @@ const UNLOCK_THRESHOLDS = {
   timeline: 50,
   export: 60,
   secondRound: 70,
-  editBio: 80,
-  collab: 90,
+  collab: 0, // Temporarily set to 0 for testing (original: 80)
+  editBio: 90,
+  delivery: 100,
 } as const;
 
 // Helper to check if a feature is unlocked
@@ -25,9 +26,10 @@ const isFeatureUnlocked = (feature: keyof typeof UNLOCK_THRESHOLDS, count: numbe
 
 type UnifiedNavProps = {
   onProClick?: () => void;
+  onCollabClick?: () => void;
 };
 
-export default function UnifiedNav({ onProClick }: UnifiedNavProps) {
+export default function UnifiedNav({ onProClick, onCollabClick }: UnifiedNavProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -553,24 +555,26 @@ export default function UnifiedNav({ onProClick }: UnifiedNavProps) {
 
               {/* COLLAB */}
               {isFeatureUnlocked('collab', answeredCount) ? (
-                <button
-                  onClick={() => {}} // Placeholder for now or Link if page exists
+                <Link
+                  href="/collab"
                   style={{
                     padding: '8px 12px',
                     height: 34,
                     boxSizing: 'border-box',
+                    display: 'flex',
+                    alignItems: 'center',
                     fontSize: 11,
                     fontWeight: 600,
                     borderRadius: 4,
-                    background: 'white',
-                    color: '#5A4F43',
-                    border: '1px solid #E3D6C6',
-                    cursor: 'pointer',
+                    textDecoration: 'none',
+                    border: pathname.includes('/collab') ? '1px solid #8B7355' : '1px solid #E3D6C6',
                     whiteSpace: 'nowrap',
+                    background: pathname.includes('/collab') ? '#FAF8F5' : 'white',
+                    color: pathname.includes('/collab') ? '#8B7355' : '#5A4F43',
                   }}
                 >
                   ◇ COLLAB
-                </button>
+                </Link>
               ) : (
                 <button
                   onClick={() => showLockedFeature('Collaboration', UNLOCK_THRESHOLDS.collab)}

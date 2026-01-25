@@ -127,10 +127,18 @@ export default function MasonryGallery({ photos, onPhotoClick }: MasonryGalleryP
 
                 {/* Unsorted badge */}
                 {!photo.is_sorted && (
-                  <div className="absolute top-2 right-2 z-10">
-                    <span className="px-2 py-1 bg-orange-500/90 backdrop-blur-sm text-white text-xs rounded-full font-medium shadow-lg">
+                  <div className="absolute top-2 right-2 z-10 flex flex-col items-end gap-1">
+                    <span className="px-2 py-1 bg-orange-500/90 backdrop-blur-sm text-white text-[10px] rounded-full font-medium shadow-lg">
                       待整理
                     </span>
+                    {photo.metadata?.completion_percentage !== undefined && (
+                      <div className="w-12 h-1.5 bg-black/30 rounded-full overflow-hidden backdrop-blur-sm border border-white/20">
+                        <div 
+                          className="h-full bg-orange-400 transition-all duration-500"
+                          style={{ width: `${photo.metadata.completion_percentage}%` }}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
 

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import UnifiedNav from '../components/UnifiedNav';
-import { listProjectOutlines, BiographyOutline } from '@/lib/biographyOutlineApi';
+import { listProjectOutlines, BiographyOutline, updateOutlineContent } from '@/lib/biographyOutlineApi';
 import { richContentToText } from '@/lib/types/outline';
 import type { RichTextContent } from '@/lib/types/outline';
 import { generateHTML } from '@tiptap/html';
@@ -26,9 +26,11 @@ import { generatePaginatedBookHTML, type PaginationConfig } from '@/lib/pdfPagin
 import {
   generateVivliostyleHTML,
   getAllChapterPhotos,
+  getChapterPhotos,
   printToPDF,
   type BookConfig,
   type BookChapter,
+  type ChapterPhoto,
 } from '@/lib/vivliostyleBookGenerator';
 
 // Helper: Convert rich content to HTML string
@@ -116,7 +118,7 @@ export default function ExportPage() {
   // State: Export Options
   type BookTemplate = 'memoir' | 'photo-heavy' | 'minimal' | 'travel' | 'wedding' | 'memorial' | 'family-history';
   const [template, setTemplate] = useState<BookTemplate>('memoir');
-  const [includePhotos, setIncludePhotos] = useState(true);
+  const [includePhotos, setIncludePhotos] = useState(false);
   const [includeFamilyTree, setIncludeFamilyTree] = useState(true);
   const [includeTOC, setIncludeTOC] = useState(true);
   const [exportFormat, setExportFormat] = useState<'epub' | 'pdf'>('pdf');
@@ -173,6 +175,15 @@ export default function ExportPage() {
   }
   const [pdfHistory, setPdfHistory] = useState<PdfHistory[]>([]);
 
+  // State: Chapter Photos from Database
+  const [chapterPhotosMap, setChapterPhotosMap] = useState<Map<number, ChapterPhoto[]>>(new Map());
+  const [loadingPhotos, setLoadingPhotos] = useState(false);
+
+  // State: Manual Upload Modal
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
   // Initialize auth and project
   useEffect(() => {
     async function init() {
@@ -209,6 +220,99 @@ export default function ExportPage() {
     }
     init();
   }, []);
+
+  // Listen for Vivliostyle preview close to prompt upload
+  useEffect(() => {
+    const handlePreviewClosed = () => {
+      // Small delay to ensure the UI feels natural
+      setTimeout(() => {
+        setShowUploadModal(true);
+      }, 500);
+    };
+    window.addEventListener('close-preview-iframe', handlePreviewClosed);
+    return () => window.removeEventListener('close-preview-iframe', handlePreviewClosed);
+  }, []);
+
+  // Handle manual PDF upload
+  const handleManualUpload = async () => {
+    if (!uploadFile || !projectId) return;
+
+    setIsUploading(true);
+    try {
+      const timestamp = Date.now();
+      // Use the uploaded filename but sanitize it
+      const safeFileName = generateStorageSafePath(uploadFile.name);
+      const storagePath = `pdfs/${projectId}/${timestamp}_${safeFileName}`;
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('biography-exports')
+        .upload(storagePath, uploadFile, {
+          contentType: 'application/pdf',
+          upsert: false
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage
+        .from('biography-exports')
+        .getPublicUrl(storagePath);
+
+      // Add to history
+      const newHistory: PdfHistory = {
+        id: crypto.randomUUID(),
+        fileName: uploadFile.name,
+        fileUrl: urlData.publicUrl,
+        template: `${template}-vivliostyle`, // Mark as vivliostyle
+        version: selectedVersion || 0,
+        createdAt: new Date().toISOString()
+      };
+
+      const updatedHistory = [newHistory, ...pdfHistory];
+      setPdfHistory(updatedHistory);
+      localStorage.setItem('pdfHistory', JSON.stringify(updatedHistory));
+
+      setShowUploadModal(false);
+      setUploadFile(null);
+      alert('✅ 上传成功，已保存到历史记录！');
+    } catch (err: any) {
+      console.error('Upload failed:', err);
+      alert('上传失败: ' + (err.message || '未知错误'));
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // Fetch photos from database for preview
+  useEffect(() => {
+    async function fetchPhotos() {
+      if (!projectId || !selectedOutline) {
+        setChapterPhotosMap(new Map());
+        return;
+      }
+
+      setLoadingPhotos(true);
+      try {
+        const bookChapters: BookChapter[] = selectedOutline.outline_json?.sections?.map((section, idx) => ({
+          title: section.title || `章节 ${idx + 1}`,
+          content: '', // Content not needed for photo lookup
+          sourceIds: (section as any).source_ids || [],
+          chapterId: String(idx),
+          outlineId: selectedOutline.id,
+        })) || [];
+
+        if (bookChapters.length > 0) {
+          const photoMap = await getAllChapterPhotos(projectId, bookChapters);
+          setChapterPhotosMap(photoMap);
+        }
+      } catch (err) {
+        console.error('Failed to fetch chapter photos:', err);
+      } finally {
+        setLoadingPhotos(false);
+      }
+    }
+
+    fetchPhotos();
+  }, [projectId, selectedOutline]);
 
   // Load outlines
   useEffect(() => {
@@ -329,6 +433,7 @@ export default function ExportPage() {
             .from('biography_outlines')
             .update({
               expanded_json: {
+                outline_json: selectedOutline.outline_json, // Preserve outline structure
                 outline_id: selectedOutline.id,
                 author_style: selectedAuthorStyle,
                 expanded_at: new Date().toISOString(),
@@ -348,6 +453,61 @@ export default function ExportPage() {
       setExpandProgress('');
     } finally {
       setExpanding(false);
+    }
+  };
+
+  const [isSavingMetadata, setIsSavingMetadata] = useState(false);
+
+  // Sync book title and author name from outline
+  useEffect(() => {
+    if (selectedOutline?.outline_json) {
+      const json = selectedOutline.outline_json as any;
+      if (json.book_title) {
+        setBookTitle(json.book_title);
+      } else {
+        setBookTitle('我的传记');
+      }
+
+      if (json.author_name) {
+        setAuthorName(json.author_name);
+      } else {
+        setAuthorName('');
+      }
+    }
+  }, [selectedOutline?.id]);
+
+  const handleSaveMetadata = async () => {
+    if (!selectedOutline?.id || !selectedOutline.outline_json) return;
+    
+    setIsSavingMetadata(true);
+    try {
+      const updatedJson = {
+        ...selectedOutline.outline_json,
+        book_title: bookTitle,
+        author_name: authorName
+      };
+
+      const { success, error } = await updateOutlineContent(selectedOutline.id, updatedJson as any);
+      
+      if (success) {
+        // Update local state outlines to reflect the change without refetching
+        setOutlines(prev => prev.map(o => 
+          o.id === selectedOutline.id 
+            ? { ...o, outline_json: updatedJson as any } 
+            : o
+        ));
+        // Update selectedOutline as well
+        setSelectedOutline(prev => prev ? { ...prev, outline_json: updatedJson as any } : prev);
+        
+        alert('保存成功！');
+      } else {
+        throw new Error(error);
+      }
+    } catch (err: any) {
+      console.error('Save metadata failed:', err);
+      alert('保存失败: ' + (err.message || '未知错误'));
+    } finally {
+      setIsSavingMetadata(false);
     }
   };
 
@@ -709,18 +869,32 @@ export default function ExportPage() {
 
           // Add attachment info
           if (includePhotos) {
-            const sectionAttachments = attachments.filter(
-              (a) => selectedVersion !== null && a.outlineVersion === selectedVersion && a.sectionIndex === idx
-            );
-            if (sectionAttachments.length > 0) {
+            // 优先从数据库获取（新系统）
+            const dbPhotos = chapterPhotosMap.get(idx) || [];
+            if (dbPhotos.length > 0) {
               chapterContent += `<div style="margin-top: 30px; padding: 15px; background: #f5f5f5; border-radius: 8px;">`;
-              chapterContent += `<p style="color: #666; font-size: 13px;">[本章节包含 ${sectionAttachments.length} 张照片附件]</p>`;
-              sectionAttachments.forEach((att) => {
-                if (att.note) {
-                  chapterContent += `<p style="margin: 5px 0; color: #444; font-size: 13px;">  - ${att.note}</p>`;
+              chapterContent += `<p style="color: #666; font-size: 13px;">[本章节包含 ${dbPhotos.length} 张照片附件]</p>`;
+              dbPhotos.forEach((photo) => {
+                if (photo.caption) {
+                  chapterContent += `<p style="margin: 5px 0; color: #444; font-size: 13px;">  - ${photo.caption}</p>`;
                 }
               });
               chapterContent += '</div>';
+            } else {
+              // 备选：从本地存储获取（旧系统）
+              const sectionAttachments = attachments.filter(
+                (a) => selectedVersion !== null && a.outlineVersion === selectedVersion && a.sectionIndex === idx
+              );
+              if (sectionAttachments.length > 0) {
+                chapterContent += `<div style="margin-top: 30px; padding: 15px; background: #f5f5f5; border-radius: 8px;">`;
+                chapterContent += `<p style="color: #666; font-size: 13px;">[本章节包含 ${sectionAttachments.length} 张照片附件]</p>`;
+                sectionAttachments.forEach((att) => {
+                  if (att.note) {
+                    chapterContent += `<p style="margin: 5px 0; color: #444; font-size: 13px;">  - ${att.note}</p>`;
+                  }
+                });
+                chapterContent += '</div>';
+              }
             }
           }
 
@@ -1051,6 +1225,8 @@ export default function ExportPage() {
           title: ch.title,
           content: ch.content,
           sourceIds: outlineSection?.source_ids || [],
+          chapterId: String(idx),
+          outlineId: selectedOutline?.id,
         };
       });
 
@@ -1072,7 +1248,7 @@ export default function ExportPage() {
       const pageSize = printPreset === 'a5Standard' ? 'A5' : 'A4';
       const bookConfig: BookConfig = {
         title: bookTitle,
-        subtitle: AUTHOR_STYLES[selectedAuthorStyle]?.name || '家族传记',
+        subtitle: '', // 不再显示风格名称
         author: authorName,
         pageSize: pageSize,
         fontSize: printConfig.body.fontSize,
@@ -1148,11 +1324,23 @@ export default function ExportPage() {
   const stats = getStats();
 
   // Build quick lookup tables for attachments and photos
-  const photoMap = new Map<string, PhotoItem>(photos.map((p) => [p.id, p]));
   const sectionPhotos = selectedOutline?.outline_json?.sections?.map((section, idx) => {
+    // 优先从数据库获取的照片（新系统）
+    const dbPhotos = chapterPhotosMap.get(idx) || [];
+    
+    if (dbPhotos.length > 0) {
+      return {
+        title: section.title || `章节 ${idx + 1}`,
+        count: dbPhotos.length,
+        thumbs: dbPhotos.map(p => p.url),
+      };
+    }
+
+    // 备选：从本地存储获取（旧系统/手动关联）
     const att = attachments.filter(
       (a) => selectedVersion !== null && a.outlineVersion === selectedVersion && a.sectionIndex === idx
     );
+    const photoMap = new Map<string, PhotoItem>(photos.map((p) => [p.id, p]));
     const thumbs = att
       .map((a) => photoMap.get(a.photoId))
       .filter((p): p is PhotoItem => !!p)
@@ -1294,6 +1482,7 @@ export default function ExportPage() {
           {/* PDF History */}
           {pdfHistory.length > 0 && (
             <div
+              id="pdf-history-section"
               style={{
                 marginTop: 16,
                 padding: 12,
@@ -2026,6 +2215,29 @@ export default function ExportPage() {
             </p>
           </div>
 
+          {/* Save Metadata Button */}
+          <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'flex-end' }}>
+             <button
+                onClick={handleSaveMetadata}
+                disabled={isSavingMetadata || !selectedOutline}
+                style={{
+                  padding: '8px 16px',
+                  background: 'var(--card)',
+                  border: '1px solid #B89B72',
+                  borderRadius: 6,
+                  color: '#B89B72',
+                  fontSize: 13,
+                  cursor: isSavingMetadata || !selectedOutline ? 'not-allowed' : 'pointer',
+                  opacity: isSavingMetadata || !selectedOutline ? 0.6 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                {isSavingMetadata ? '保存中...' : '💾 保存标题和署名'}
+              </button>
+          </div>
+
           {/* Options */}
           <div style={{ marginBottom: 24 }}>
             <label style={{ display: 'block', fontSize: 14, marginBottom: 12 }}>
@@ -2073,15 +2285,26 @@ export default function ExportPage() {
           {/* Preview & Export Buttons */}
           <div style={{ display: 'flex', gap: 12 }}>
             <button
-              onClick={() => setShowPreview(true)}
-              disabled={!selectedOutline}
-              className="px-5 py-3.5 bg-white border border-[#E5E5E0] hover:bg-[#F5F5F0] text-[#2C2C2C] rounded-xl transition-all duration-200 font-medium shadow-sm flex-1 flex items-center justify-center gap-2"
-              style={{
-                opacity: !selectedOutline ? 0.5 : 1,
-                cursor: !selectedOutline ? 'not-allowed' : 'pointer',
+              onClick={() => {
+                const historySection = document.getElementById('pdf-history-section');
+                if (historySection) {
+                  historySection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  // Add a temporary highlight effect
+                  const originalBg = historySection.style.background;
+                  historySection.style.transition = 'background 0.5s';
+                  historySection.style.background = 'rgba(95, 111, 82, 0.25)';
+                  setTimeout(() => {
+                    historySection.style.background = originalBg;
+                  }, 1500);
+                } else {
+                  if (pdfHistory.length === 0) {
+                    alert('暂无导出记录，请先导出一次 PDF');
+                  }
+                }
               }}
+              className="px-5 py-3.5 bg-white border border-[#E5E5E0] hover:bg-[#F5F5F0] text-[#2C2C2C] rounded-xl transition-all duration-200 font-medium shadow-sm flex-1 flex items-center justify-center gap-2"
             >
-              👁️ 预览效果
+              📥 查看过往导出
             </button>
             <button
               onClick={handleExport}
@@ -2531,26 +2754,52 @@ export default function ExportPage() {
 
                   {/* Photo placeholder */}
                   {includePhotos && (
-                    <div style={{ marginTop: 24, display: 'flex', gap: 12 }}>
-                      {[1, 2].map((n) => (
-                        <div
-                          key={n}
-                          style={{
-                            width: 120,
-                            height: 90,
-                            background: '#f0f0f0',
-                            border: '1px solid #ddd',
-                            borderRadius: 4,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: '#999',
-                            fontSize: 11,
-                          }}
-                        >
-                          📷 照片位置
-                        </div>
-                      ))}
+                    <div style={{ marginTop: 24, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                      {(() => {
+                        const photos = chapterPhotosMap.get(0) || [];
+                        if (photos.length > 0) {
+                          return photos.slice(0, 3).map((photo, i) => (
+                            <div key={i} style={{ textAlign: 'center' }}>
+                              <img
+                                src={photo.url}
+                                alt={photo.caption || ''}
+                                style={{
+                                  width: 150,
+                                  height: 110,
+                                  objectFit: 'cover',
+                                  borderRadius: 4,
+                                  border: '1px solid #ddd',
+                                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                                }}
+                              />
+                              {photo.caption && (
+                                <p style={{ fontSize: 9, color: '#666', marginTop: 4, fontStyle: 'italic', maxWidth: 150 }}>
+                                  {photo.caption}
+                                </p>
+                              )}
+                            </div>
+                          ));
+                        }
+                        return [1, 2].map((n) => (
+                          <div
+                            key={n}
+                            style={{
+                              width: 120,
+                              height: 90,
+                              background: '#f0f0f0',
+                              border: '1px solid #ddd',
+                              borderRadius: 4,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#999',
+                              fontSize: 11,
+                            }}
+                          >
+                            📷 照片位置
+                          </div>
+                        ));
+                      })()}
                     </div>
                   )}
                 </div>
@@ -2736,6 +2985,150 @@ export default function ExportPage() {
                 </>
               );
             })()}
+          </div>
+        </div>
+      )}
+      {/* Manual Upload Modal */}
+      {showUploadModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.8)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 2000,
+          }}
+          onClick={() => setShowUploadModal(false)}
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 12,
+              padding: 32,
+              maxWidth: 500,
+              width: '90%',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
+              textAlign: 'center',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 48, marginBottom: 16 }}>📤</div>
+            <h3 style={{ fontSize: 22, fontWeight: 700, color: '#333', marginBottom: 12 }}>
+              保存到云端记录
+            </h3>
+            <p style={{ fontSize: 14, color: '#666', lineHeight: 1.6, marginBottom: 24 }}>
+              您刚才导出了 PDF，是否希望将其保存到云端？<br/>
+              上传后，您可以在左侧的“查看过往导出”中随时找回。
+            </p>
+            
+            <div style={{ marginBottom: 24 }}>
+              <label 
+                htmlFor="pdf-upload" 
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: '2px dashed #ddd',
+                  borderRadius: 8,
+                  padding: 30,
+                  cursor: 'pointer',
+                  background: '#f9f9f9',
+                  transition: 'all 0.2s',
+                }}
+                onDragOver={e => {
+                   e.preventDefault();
+                   e.currentTarget.style.background = '#f0f7ff';
+                   e.currentTarget.style.borderColor = '#3498db';
+                }}
+                onDragLeave={e => {
+                   e.preventDefault();
+                   e.currentTarget.style.background = '#f9f9f9';
+                   e.currentTarget.style.borderColor = '#ddd';
+                }}
+                onDrop={e => {
+                   e.preventDefault();
+                   e.currentTarget.style.background = '#f9f9f9';
+                   e.currentTarget.style.borderColor = '#ddd';
+                   const file = e.dataTransfer.files[0];
+                   if (file && file.type === 'application/pdf') {
+                     setUploadFile(file);
+                   }
+                }}
+              >
+                {uploadFile ? (
+                   <div style={{ color: '#27ae60', fontWeight: 600 }}>
+                     📄 {uploadFile.name}
+                   </div>
+                ) : (
+                   <>
+                     <span style={{ color: '#3498db', fontWeight: 600, marginBottom: 4 }}>点击选择 PDF 文件</span>
+                     <span style={{ fontSize: 12, color: '#999' }}>或将文件拖放到此处</span>
+                   </>
+                )}
+                <input
+                  id="pdf-upload"
+                  type="file"
+                  accept="application/pdf"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) setUploadFile(file);
+                  }}
+                />
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button
+                onClick={() => setShowUploadModal(false)}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  background: '#f5f5f5',
+                  border: 'none',
+                  borderRadius: 8,
+                  color: '#666',
+                  fontSize: 14,
+                  cursor: 'pointer',
+                }}
+              >
+                暂不保存
+              </button>
+              <button
+                onClick={handleManualUpload}
+                disabled={!uploadFile || isUploading}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  background: !uploadFile || isUploading ? '#ccc' : '#3498db',
+                  border: 'none',
+                  borderRadius: 8,
+                  color: 'white',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: !uploadFile || isUploading ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                }}
+              >
+                {isUploading ? (
+                  <>
+                    <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
+                    上传中...
+                  </>
+                ) : (
+                  '确认上传'
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

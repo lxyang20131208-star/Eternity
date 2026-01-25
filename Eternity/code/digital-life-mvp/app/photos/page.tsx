@@ -132,7 +132,7 @@ export default function PhotosPage() {
       // Query photo_memories directly by user_id
       let query = supabase
         .from('photo_memories')
-        .select('*')
+        .select('*, photo_people(count)')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false });
 
@@ -151,32 +151,49 @@ export default function PhotosPage() {
       }
 
       // Map database fields to Photo type
-      const mappedPhotos: Photo[] = (photosData || []).map((p: any) => ({
-        id: p.id,
-        project_id: projectId || '',
-        url: p.photo_url,
-        thumb_url: p.photo_url,
-        title: p.file_name,
-        description: p.caption,
-        source: 'upload',
-        taken_at: p.time_taken || p.created_at,
-        uploaded_at: p.created_at,
-        place_id: p.place_id,
-        person_ids: [], // Will be loaded in detail view
-        tags: [],
-        is_sorted: p.annotation_status === 'complete',
-        metadata: {
-          linked_question_id: p.linked_question_id,
-          time_taken: p.time_taken,
-          time_precision: 'exact', // Default
+      const mappedPhotos: Photo[] = (photosData || []).map((p: any) => {
+        const hasQuestion = !!p.linked_question_id;
+        const hasTime = !!p.time_taken;
+        const hasPlace = !!p.place_id;
+        const hasCaption = !!(p.caption && p.caption.trim());
+        const peopleCount = p.photo_people?.[0]?.count || 0;
+        const hasPeople = peopleCount > 0;
+
+        let completion_percentage = 0;
+        if (hasQuestion) completion_percentage += 20;
+        if (hasTime) completion_percentage += 20;
+        if (hasPlace) completion_percentage += 20;
+        if (hasCaption) completion_percentage += 20;
+        if (hasPeople) completion_percentage += 20;
+
+        return {
+          id: p.id,
+          project_id: projectId || '',
+          url: p.photo_url,
+          thumb_url: p.photo_url,
+          title: p.file_name,
+          description: p.caption,
+          source: 'upload',
+          taken_at: p.time_taken || p.created_at,
+          uploaded_at: p.created_at,
           place_id: p.place_id,
-          caption: p.caption,
-          annotation_status: p.annotation_status,
-          originalName: p.file_name
-        },
-        created_at: p.created_at,
-        updated_at: p.created_at,
-      }));
+          person_ids: [], // Will be loaded in detail view
+          tags: [],
+          is_sorted: p.annotation_status === 'complete',
+          metadata: {
+            linked_question_id: p.linked_question_id,
+            time_taken: p.time_taken,
+            time_precision: 'exact', // Default
+            place_id: p.place_id,
+            caption: p.caption,
+            annotation_status: p.annotation_status,
+            originalName: p.file_name,
+            completion_percentage: completion_percentage
+          },
+          created_at: p.created_at,
+          updated_at: p.created_at,
+        };
+      });
 
       setPhotos(mappedPhotos);
     } catch (error: any) {

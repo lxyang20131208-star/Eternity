@@ -12,8 +12,9 @@ const MILESTONES = [
   { count: 50, label: 'Timeline', icon: '⏳' },
   { count: 60, label: 'Export', icon: '📤' },
   { count: 70, label: 'Round 2', icon: '🔄' },
-  { count: 80, label: 'Bio Edit', icon: '✍️' },
-  { count: 90, label: 'Collab', icon: '🤝' },
+  { count: 80, label: 'Collab', icon: '🤝' },
+  { count: 90, label: 'Bio Edit', icon: '✍️' },
+  { count: 100, label: 'Delivery', icon: '📦' },
 ]
 
 export function CompletionMilestones({ answeredCount }: CompletionMilestonesProps) {
@@ -160,8 +161,8 @@ export function CompletionMilestones({ answeredCount }: CompletionMilestonesProp
         fontStyle: 'italic',
         marginTop: 12
       }}>
-        {answeredCount < 90 
-          ? `Answer ${90 - answeredCount} more to unlock all features!` 
+        {answeredCount < 100 
+          ? `Answer ${100 - answeredCount} more to unlock all features!` 
           : 'All milestones unlocked! 🎉'}
       </div>
 

@@ -22,6 +22,8 @@ export interface OutlineSectionV2 {
 export interface OutlineJSONV2 {
   title: string
   title_rich?: RichTextContent
+  book_title?: string
+  author_name?: string
   generatedAt: string
   totalSessions: number
   sections: OutlineSectionV2[]

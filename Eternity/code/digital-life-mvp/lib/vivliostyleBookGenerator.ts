@@ -11,6 +11,8 @@ export interface BookChapter {
   title: string;
   content: string;
   sourceIds: string[];  // 关联的 answer_session IDs
+  chapterId?: string;   // 章节 ID (通常是索引)
+  outlineId?: string;   // 大纲 ID
 }
 
 export interface ChapterPhoto {
@@ -62,47 +64,62 @@ const PHOTO_SIZES: Record<string, { width: string; maxHeight: string }> = {
  */
 export async function getChapterPhotos(
   projectId: string,
-  sourceIds: string[]
+  sourceIds: string[],
+  outlineId?: string,
+  chapterId?: string
 ): Promise<ChapterPhoto[]> {
-  // 如果没有 source_ids，直接返回空数组（这是正常情况）
-  if (!sourceIds || sourceIds.length === 0) {
-    return [];
-  }
-
   try {
-    // 1. 先获取 answer_sessions 的 question_ids
-    const { data: sessions, error: sessionError } = await supabase
-      .from('answer_sessions')
-      .select('id, question_id')
-      .in('id', sourceIds);
+    const questionIds = new Set<string>();
 
-    // 如果查询出错，记录错误但不中断流程
-    if (sessionError) {
-      console.warn('[getChapterPhotos] Session query error:', sessionError.message);
+    // 1. 从 answer_sessions 获取 question_ids
+    if (sourceIds && sourceIds.length > 0) {
+      const { data: sessions } = await supabase
+        .from('answer_sessions')
+        .select('question_id')
+        .in('id', sourceIds);
+      
+      if (sessions) {
+        sessions.forEach(s => {
+          if (s.question_id) questionIds.add(s.question_id);
+        });
+      }
+    }
+
+    // 2. 从 chapter_question_links 获取 question_ids
+    if (outlineId && chapterId) {
+      const { data: links } = await supabase
+        .from('chapter_question_links')
+        .select('question_id')
+        .eq('outline_version_id', outlineId)
+        .eq('chapter_id', chapterId);
+      
+      if (links) {
+        links.forEach(l => {
+          if (l.question_id) questionIds.add(l.question_id);
+        });
+      }
+    }
+
+    if (questionIds.size === 0) {
       return [];
     }
 
-    // 没有找到 sessions 是正常情况（可能 source_ids 无效）
-    if (!sessions || sessions.length === 0) {
-      return [];
-    }
+    const questionIdList = Array.from(questionIds);
 
-    const questionIds = sessions
-      .map(s => s.question_id)
-      .filter((id): id is string => !!id);
-
-    // 没有 question_ids 也是正常情况
-    if (questionIds.length === 0) {
-      return [];
-    }
-
-    // 2. 根据 question_ids 获取照片
+    // 3. 根据 question_ids 获取照片 (使用新的 photo_memories 系统)
     const { data: photos, error: photoError } = await supabase
-      .from('answer_photos')
-      .select('photo_url, person_names, question_id')
-      .eq('project_id', projectId)
-      .in('question_id', questionIds)
-      .order('display_order', { ascending: true });
+      .from('photo_memories')
+      .select(`
+        photo_url,
+        caption,
+        linked_question_id,
+        photo_people(
+          people_roster(name)
+        )
+      `)
+      .in('linked_question_id', questionIdList)
+      .eq('annotation_status', 'complete')
+      .order('created_at', { ascending: true });
 
     if (photoError) {
       console.warn('[getChapterPhotos] Photo query error:', photoError.message);
@@ -114,11 +131,21 @@ export async function getChapterPhotos(
       return [];
     }
 
-    return photos.map(p => ({
-      url: p.photo_url,
-      personNames: p.person_names || [],
-      questionId: p.question_id,
-    }));
+    return photos.map(p => {
+      // 提取人物姓名
+      const personNames = p.photo_people
+        ? (p.photo_people as any[])
+            .map(pp => pp.people_roster?.name)
+            .filter(Boolean)
+        : [];
+
+      return {
+        url: p.photo_url,
+        personNames: personNames,
+        caption: p.caption || '',
+        questionId: p.linked_question_id,
+      };
+    });
   } catch (e) {
     console.warn('[getChapterPhotos] Unexpected error:', e);
     return [];
@@ -136,7 +163,12 @@ export async function getAllChapterPhotos(
 
   for (let i = 0; i < chapters.length; i++) {
     const chapter = chapters[i];
-    const photos = await getChapterPhotos(projectId, chapter.sourceIds);
+    const photos = await getChapterPhotos(
+      projectId,
+      chapter.sourceIds,
+      chapter.outlineId,
+      chapter.chapterId
+    );
     photoMap.set(i, photos);
   }
 
@@ -165,12 +197,244 @@ export function generateVivliostyleHTML(
   <title>${escapeHtml(config.title)}</title>
   <style>
 ${css}
+    /* Loading Overlay 样式 */
+    #loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: white;
+      z-index: 99999;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      font-family: system-ui, -apple-system, sans-serif;
+      transition: opacity 0.5s;
+    }
+    
+    #loading-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .loading-content {
+      text-align: center;
+      max-width: 400px;
+      padding: 40px;
+    }
+
+    .spinner-large {
+      width: 50px;
+      height: 50px;
+      border: 4px solid rgba(0, 0, 0, 0.1);
+      border-top: 4px solid #3498db;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 30px;
+    }
+
+    .loading-title {
+      font-size: 24px;
+      font-weight: 600;
+      color: #2c3e50;
+      margin-bottom: 16px;
+    }
+
+    .loading-text {
+      font-size: 16px;
+      color: #666;
+      margin-bottom: 8px;
+    }
+
+    .sub-text {
+      font-size: 13px;
+      color: #999;
+      margin-top: 20px;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 6px;
+      background: #f0f0f0;
+      border-radius: 3px;
+      margin-top: 20px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: #3498db;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    /* 打印时绝对隐藏 */
+    @media print {
+      #loading-overlay { display: none !important; }
+      #status-bar { display: none !important; }
+    }
   </style>
+  <script>
+    // 定义全局变量
+    let overlay, progressFill, loadingText, printBtn;
+    let images = [];
+    let total = 0;
+    let loaded = 0;
+    let printTriggered = false;
+
+    // 手动打印函数 - 提前定义
+    window.triggerPrint = () => {
+      if (printTriggered) return;
+      printTriggered = true;
+      
+      console.log('Triggering print sequence...');
+      
+      const overlayEl = document.getElementById('loading-overlay');
+      const fillEl = document.querySelector('.progress-fill');
+      const textEl = document.querySelector('.loading-text');
+      
+      // 更新 UI 状态
+      if (textEl) textEl.textContent = '✅ 渲染完成，正在唤起打印...';
+      if (fillEl) fillEl.style.width = '100%';
+      
+      // 延迟一点时间让用户看到完成状态，然后隐藏遮罩并打印
+      setTimeout(() => {
+        if (overlayEl) {
+          overlayEl.classList.add('hidden');
+          setTimeout(() => {
+            overlayEl.style.display = 'none';
+            console.log('Calling window.print()');
+            window.print();
+          }, 500);
+        } else {
+           window.print();
+        }
+      }, 800);
+    };
+
+    // 关闭预览函数
+    window.closePreview = () => {
+        // 如果是在 iframe 中
+        if (window.frameElement && window.parent) {
+            try {
+                // 通知父窗口移除 iframe
+                const event = new CustomEvent('close-preview-iframe');
+                window.parent.dispatchEvent(event);
+                // 备用：直接尝试移除
+                window.parent.document.body.removeChild(window.frameElement);
+            } catch(e) {
+                console.error('Error closing iframe:', e);
+            }
+        } else {
+            // 如果是在新窗口中
+            window.close();
+        }
+    };
+
+    // 立即启动超时保护（不等待 load 事件）
+    // 60秒强制打印
+    setTimeout(() => {
+      if (!printTriggered) {
+         console.warn('Global timeout reached (60s), forcing print...');
+         const textEl = document.querySelector('.loading-text');
+         if (textEl) textEl.textContent = '⚠️ 加载时间较长，正在尝试打印...';
+         window.triggerPrint();
+      }
+    }, 60000);
+
+    // 监听 DOM 内容加载（不需要等待图片）
+    document.addEventListener('DOMContentLoaded', () => {
+      overlay = document.getElementById('loading-overlay');
+      progressFill = document.querySelector('.progress-fill');
+      loadingText = document.querySelector('.loading-text');
+      printBtn = document.getElementById('manual-print-btn');
+      
+      images = Array.from(document.querySelectorAll('img'));
+      total = images.length;
+      
+      console.log('DOM Ready. Found ' + total + ' images.');
+
+      if (printBtn) {
+        printBtn.addEventListener('click', window.triggerPrint);
+      }
+
+      // 如果没有图片，模拟进度条
+      if (total === 0) {
+        let fakeProgress = 0;
+        const interval = setInterval(() => {
+            fakeProgress += 10;
+            if (progressFill) progressFill.style.width = \`\${fakeProgress}%\`;
+            if (fakeProgress >= 100) {
+                clearInterval(interval);
+                window.triggerPrint();
+            }
+        }, 100);
+      } else {
+        // 绑定图片加载事件
+        images.forEach(img => {
+          if (img.complete) {
+            updateProgress();
+          } else {
+            img.onload = updateProgress;
+            img.onerror = updateProgress;
+          }
+        });
+      }
+    });
+
+    // 即使 DOMContentLoaded 触发了，load 事件也是一个很好的双重检查点
+    window.addEventListener('load', () => {
+      console.log('Window Load event fired');
+      // 检查是否所有图片都处理完了，防止漏网之鱼
+      // 但不在这里触发打印，除非之前的逻辑失效
+    });
+
+    function updateProgress() {
+      loaded++;
+      const percent = Math.round((loaded / total) * 100);
+      
+      if (progressFill) {
+         progressFill.style.width = \`\${percent}%\`;
+      }
+      
+      if (loadingText) {
+         loadingText.textContent = \`正在加载图片资源 (\${loaded}/\${total})...\`;
+      }
+
+      if (loaded >= total) {
+        console.log('All images loaded.');
+        // 所有图片加载完成
+        setTimeout(() => {
+          window.triggerPrint();
+        }, 500);
+      }
+    }
+  </script>
 </head>
 <body>
-  <div class="print-hint">
-    📖 按 <strong>Ctrl+P</strong> (Mac: <strong>Cmd+P</strong>) 导出 PDF
+  <div id="loading-overlay">
+    <div class="loading-content">
+      <div class="spinner-large"></div>
+      <div class="loading-title">正在生成打印版式</div>
+      <div class="loading-text">正在分析文档结构...</div>
+      <div class="progress-bar"><div class="progress-fill"></div></div>
+      <div class="sub-text">文档内容较多，可能需要 1-2 分钟<br>请保持窗口打开，直到打印对话框弹出</div>
+    </div>
   </div>
+
+  <div id="status-bar" style="display:none;">
+    <!-- 保留结构但默认隐藏，逻辑上已被 Overlay 取代 -->
+    <button id="manual-print-btn">立即打印 (Ctrl+P)</button>
+    <button onclick="window.closePreview()" style="margin-left:10px; background:#e74c3c; border:none; color:white; padding:4px 12px; border-radius:4px; cursor:pointer;">关闭预览</button>
+  </div>
+
   <div class="book-content">
 `;
 
@@ -488,6 +752,12 @@ function generateVivliostyleCSS(
 
     /* ========== 打印优化 ========== */
     @media print {
+      html, body {
+        height: auto !important;
+        overflow: visible !important;
+        min-height: 100%;
+      }
+
       body {
         background: white;
         padding: 0;
@@ -497,6 +767,7 @@ function generateVivliostyleCSS(
         max-width: none;
         padding: 0;
         box-shadow: none;
+        overflow: visible !important;
       }
 
       .page-break {
@@ -505,6 +776,11 @@ function generateVivliostyleCSS(
 
       .print-hint {
         display: none;
+      }
+
+      /* 打印时强制隐藏加载遮罩 */
+      #loading-overlay {
+        display: none !important;
       }
 
       .cover-page {
@@ -533,7 +809,7 @@ function generateCoverPage(config: BookConfig): string {
   return `
   <section class="cover-page">
     <h1>${escapeHtml(config.title)}</h1>
-    ${config.subtitle ? `<p class="subtitle">${escapeHtml(config.subtitle)}</p>` : '<p class="subtitle">家族传记</p>'}
+    ${config.subtitle ? `<p class="subtitle">${escapeHtml(config.subtitle)}</p>` : ''}
     ${config.author ? `<p class="author">${escapeHtml(config.author)} 著</p>` : ''}
     <p class="year">${new Date().getFullYear()}</p>
   </section>
@@ -665,7 +941,7 @@ function generatePhotoHTML(photo: ChapterPhoto): string {
 
   return `
       <div class="photo-container">
-        <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(caption)}" loading="lazy" />
+        <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(caption)}" />
         ${caption ? `<p class="photo-caption">${escapeHtml(caption)}</p>` : ''}
       </div>
 `;
@@ -690,7 +966,7 @@ function generatePhotoGroup(photos: ChapterPhoto[], title: string): string {
 
     html += `
           <div class="photo-item">
-            <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(caption)}" loading="lazy" />
+            <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(caption)}" />
             ${caption ? `<p class="photo-caption">${escapeHtml(caption)}</p>` : ''}
           </div>
 `;
@@ -721,46 +997,53 @@ function escapeHtml(text: string): string {
 // ============ 导出工具 ============
 
 /**
- * 使用浏览器打印功能导出 PDF
- * 这是最简单的方案，利用浏览器原生支持的 CSS Paged Media
+ * 使用 iframe 在当前页面进行打印，替代 window.open
+ * 解决弹窗拦截、Blob URL 失效和加载不稳定问题
  */
 export function printToPDF(html: string): void {
-  // 方法1：使用 Blob URL（更可靠）
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-
-  const printWindow = window.open(url, '_blank');
-  if (!printWindow) {
-    URL.revokeObjectURL(url);
-    alert('请允许弹出窗口以导出 PDF');
-    return;
-  }
-
-  // 等待内容加载完成后打印
-  printWindow.onload = () => {
-    // 给字体和内容一些时间渲染
-    setTimeout(() => {
-      printWindow.print();
-      // 打印对话框关闭后清理 URL
-      setTimeout(() => {
-        URL.revokeObjectURL(url);
-      }, 1000);
-    }, 1000);
-  };
-
-  // 备用方案：如果 onload 没有触发（某些浏览器）
-  setTimeout(() => {
-    if (printWindow && !printWindow.closed) {
-      // 检查文档是否已加载
-      try {
-        if (printWindow.document.readyState === 'complete') {
-          // 已经加载完成，不需要再触发打印
+  // 1. 创建全屏 iframe
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.top = '0';
+  iframe.style.left = '0';
+  iframe.style.width = '100vw';
+  iframe.style.height = '100vh';
+  iframe.style.border = 'none';
+  iframe.style.zIndex = '2147483647'; // 最高层级
+  iframe.style.backgroundColor = 'white';
+  iframe.id = 'print-preview-iframe';
+  
+  // 2. 添加到文档流
+  document.body.appendChild(iframe);
+  
+  // 3. 监听关闭事件（供 HTML 内部调用）
+  const closeHandler = () => {
+    try {
+        if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
         }
-      } catch (e) {
-        // 跨域错误，忽略
-      }
+        window.removeEventListener('close-preview-iframe', closeHandler);
+    } catch (e) {
+        console.warn('Error removing iframe:', e);
     }
-  }, 3000);
+  };
+  window.addEventListener('close-preview-iframe', closeHandler);
+
+  // 4. 写入内容
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) {
+      alert('无法创建打印预览窗口，请重试');
+      return;
+  }
+  
+  doc.open();
+  doc.write(html);
+  doc.close();
+  
+  // 5. 焦点转移
+  if (iframe.contentWindow) {
+      iframe.contentWindow.focus();
+  }
 }
 
 /**

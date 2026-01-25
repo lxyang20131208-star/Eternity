@@ -34,29 +34,42 @@ export function SlotFilledDisplay({
 
   return (
     <div
-      className={`group flex items-start gap-2 py-2 px-3 rounded
-                 hover:bg-slate-100 transition-colors
+      className={`group flex items-start gap-2 py-3 px-3 rounded mb-2
+                 border border-[var(--border)]
+                 bg-white hover:bg-[rgba(184,155,114,0.05)]
+                 transition-colors
                  ${canClick ? 'cursor-pointer' : 'cursor-default'}`}
+      style={{
+        borderColor: 'rgba(184,155,114,0.2)'
+      }}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
       onClick={handleClick}
     >
       {/* 问题图标 */}
-      <span className={`mt-0.5 flex-shrink-0 ${canClick ? 'text-amber-600' : 'text-slate-400'}`}>
-        {canClick ? '●' : '○'}
-      </span>
+      <div 
+        className="flex-shrink-0 flex items-center justify-center w-5 h-5 rounded mt-0.5"
+        style={{
+          background: 'rgba(184,155,114,0.1)',
+          border: '1px solid rgba(184,155,114,0.3)',
+          color: '#8B7355',
+          fontSize: '10px'
+        }}
+      >
+        ◇
+      </div>
 
       {/* 问题文本 */}
-      <span className={`flex-1 text-sm leading-relaxed ${canClick ? 'text-slate-800 hover:text-amber-700' : 'text-slate-600'}`}>
+      <span className={`flex-1 text-sm leading-relaxed ${canClick ? 'text-[#5A4F43] group-hover:text-[#8B7355]' : 'text-slate-600'}`}>
         {text}
       </span>
 
       {/* 来源标识 */}
       <span
-        className="text-xs text-slate-400 flex-shrink-0"
+        className="text-xs text-[#8C8377] flex-shrink-0 opacity-50"
         title={source === 'ai' ? 'AI 生成' : '自己写的'}
       >
-        {source === 'ai' ? '✨' : '✎'}
+        {source === 'ai' ? '✨' : ''}
       </span>
 
       {/* 保存失败提示 */}

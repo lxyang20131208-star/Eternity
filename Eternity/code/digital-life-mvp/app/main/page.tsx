@@ -276,8 +276,9 @@ function MainPageContent() {
     timeline: 50,
     export: 60,       // Export page (but edit biography is still locked)
     secondRound: 70,  // Second Round Questions (in Map page)
-    editBio: 80,      // Edit biography content in Export page
-    collab: 90,       // Collab page + 3 monthly gift cards
+    collab: 80,       // Collab page + 3 monthly gift cards
+    editBio: 90,      // Edit biography content in Export page
+    delivery: 100,    // Book delivery
   } as const
 
   // Chapter order for Plus users unlock logic (1-6 payments = 1-6 chapters)
@@ -933,6 +934,29 @@ function MainPageContent() {
     }
   }
 
+  async function updateFreeQuestion(questionId: string, text: string) {
+    if (!userId) return
+
+    try {
+      const { error } = await supabase
+        .from('questions')
+        .update({ text })
+        .eq('id', questionId)
+
+      if (error) throw error
+
+      setQuestions(prev => prev.map(q => 
+        q.id === questionId ? { ...q, text } : q
+      ))
+
+      showToast('Question updated', 'success')
+    } catch (e: any) {
+      console.error('Failed to update question:', e)
+      showToast('Update failed', 'error')
+      throw e
+    }
+  }
+
   async function startRecording() {
     setError(null)
     setAudioUrl(null)
@@ -1486,6 +1510,15 @@ function MainPageContent() {
     }
   })
 
+  // Sort chapterGroups by chapter number to ensure correct order (1-6)
+  chapterGroups.sort((a, b) => {
+    const getNum = (s: string) => {
+      const m = s.match(/^(\d+)\./)
+      return m ? parseInt(m[1], 10) : 1000
+    }
+    return getNum(a.displayName) - getNum(b.displayName)
+  })
+
   function toggleChapter(name: string) {
     // Check if chapter is locked for Plus users
     if (membershipTier === 'plus' && !isChapterUnlocked(name, membershipTier, paymentCount)) {
@@ -1552,7 +1585,10 @@ function MainPageContent() {
         maxWidth: 1400,
         margin: '0 auto',
       }}>
-        <UnifiedNav onProClick={() => setShowPremiumModal(true)} />
+        <UnifiedNav
+          onProClick={() => setShowPremiumModal(true)}
+          onCollabClick={() => setShowCollaboratorModal(true)}
+        />
 
         {/* Main Content */}
         {!isLoggedIn ? (
@@ -1652,7 +1688,9 @@ function MainPageContent() {
                       border: '1px solid rgba(184,155,114,0.3)',
                       letterSpacing: '1px',
                     }}>
-                      Q{currentQuestion.id.replace(/^Q/i, '')}
+                      {currentQuestion.id.match(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i)
+                        ? 'Custom Q'
+                        : `Q${currentQuestion.id.replace(/^Q/i, '')}`}
                     </div>
                     <div style={{
                       fontSize: 12,
@@ -1660,7 +1698,7 @@ function MainPageContent() {
                       flex: 1,
                       padding: '6px 0',
                     }}>
-                      📘 {currentQuestion.chapter ?? 'Uncategorized'}
+                      📘 {formatChapterName(currentQuestion.chapter ?? '')}
                     </div>
                   </div>
 
@@ -2612,8 +2650,10 @@ function MainPageContent() {
               padding: 20,
               display: 'flex',
               flexDirection: 'column',
-              maxHeight: 'calc(100vh - 200px)',
+              height: 'calc(100vh - 120px)',
               overflow: 'hidden',
+              position: 'sticky',
+              top: 100,
             }}>
               {/* Progress */}
               <div style={{ marginBottom: 20 }}>
@@ -2709,8 +2749,9 @@ function MainPageContent() {
                 )}
                 {chapterGroups.map((group) => {
                   const collapsed = openChapter !== group.name
-                  const visibleItems = group.items.filter((item) => !item.isCustom)
-                  const answeredInGroup = visibleItems.filter((item) => answeredSet.has(String(item.id))).length
+                  // visibleItems 变量实际上只用于计算 answeredInGroup，但逻辑有误导致漏算了自定义题目
+                  // 直接使用 group.items 计算，确保分母分子口径一致
+                  const answeredInGroup = group.items.filter((item) => answeredSet.has(String(item.id))).length
                   const chapterLocked = membershipTier === 'plus' && !isChapterUnlocked(group.name, membershipTier, paymentCount)
 
                   return (
@@ -2719,7 +2760,7 @@ function MainPageContent() {
                       style={{
                         border: collapsed ? '1px solid rgba(184,155,114,0.1)' : '1px solid rgba(184,155,114,0.3)',
                         borderRadius: 4,
-                        overflow: 'hidden',
+                        // overflow: 'hidden', // Commented out to allow sticky header
                         background: chapterLocked ? 'rgba(200,200,200,0.1)' : 'white',
                         transition: 'all 0.3s',
                         opacity: chapterLocked ? 0.7 : 1,
@@ -2733,9 +2774,14 @@ function MainPageContent() {
                           alignItems: 'center',
                           justifyContent: 'space-between',
                           padding: '12px 14px',
-                          background: 'transparent',
+                          background: chapterLocked ? '#f5f5f5' : 'white',
                           border: 'none',
                           cursor: chapterLocked ? 'not-allowed' : 'pointer',
+                          position: 'sticky',
+                          top: 0,
+                          zIndex: 10,
+                          borderTopLeftRadius: 4,
+                          borderTopRightRadius: 4,
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, minWidth: 0, flex: 1 }}>
@@ -2791,8 +2837,8 @@ function MainPageContent() {
                           flexDirection: 'column',
                           gap: 6,
                           padding: '10px 10px 24px',
-                          maxHeight: 280,
-                          overflowY: 'auto',
+                          maxHeight: '35vh', // 限制高度，防止将其他章节标题挤出视口
+                          overflowY: 'auto', // 允许内部滚动查看更多问题
                         }}>
                           {group.items.filter((q) => !q.isCustom).map((q) => {
                             const qid = String(q.id)
@@ -2875,97 +2921,7 @@ function MainPageContent() {
                             )
                           })}
 
-                          {/* 自定义问题列表（带Delete按钮） */}
-                          {group.items.filter((q) => q.isCustom).map((q) => {
-                            const qid = String(q.id)
-                            const done = answeredSet.has(qid)
-                            const selected = qid === currentQuestionId
-
-                            return (
-                              <div key={qid} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                <button
-                                  onClick={() => setCurrentQuestionId(qid)}
-                                  style={{
-                                    flex: 1,
-                                    textAlign: 'left',
-                                    padding: '10px 12px',
-                                    border: selected
-                                      ? '1px solid rgba(184,155,114,0.8)'
-                                      : done
-                                        ? '1px solid rgba(0, 255, 136, 0.3)'
-                                        : '1px solid rgba(184,155,114,0.1)',
-                                    background: selected
-                                      ? 'rgba(184,155,114,0.15)'
-                                      : done
-                                        ? 'rgba(0, 255, 136, 0.05)'
-                                        : 'white',
-                                    borderRadius: 4,
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    gap: 10,
-                                    alignItems: 'flex-start',
-                                    transition: 'all 0.2s',
-                                    boxShadow: selected ? '0 0 15px rgba(184,155,114,0.2)' : 'none',
-                                  }}
-                                >
-                                  <div style={{
-                                    width: 20,
-                                    height: 20,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontSize: 10,
-                                    flexShrink: 0,
-                                    borderRadius: 3,
-                                    border: done
-                                      ? '1px solid rgba(0, 255, 136, 0.5)'
-                                      : '1px solid rgba(184,155,114,0.3)',
-                                    background: done
-                                      ? 'rgba(0, 255, 136, 0.2)'
-                                      : 'white',
-                                    color: done ? '#8B7355' : '#556677',
-                                  }}>
-                                    {done ? '◆' : '◇'}
-                                  </div>
-
-                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{
-                                      fontSize: 12,
-                                      color: selected ? '#8B7355' : done ? '#8B7355' : '#5A4F43',
-                                      fontWeight: 500,
-                                      lineHeight: 1.4,
-                                      overflow: 'hidden',
-                                      textOverflow: 'ellipsis',
-                                      display: '-webkit-box',
-                                      WebkitLineClamp: 2,
-                                      WebkitBoxOrient: 'vertical',
-                                    }}>
-                                      {q.text}
-                                    </div>
-                                  </div>
-                                </button>
-                                
-                                <button
-                                  onClick={() => deleteFreeQuestion(qid)}
-                                  style={{
-                                    padding: '6px 10px',
-                                    fontSize: 11,
-                                    fontWeight: 600,
-                                    background: 'rgba(255, 68, 102, 0.15)',
-                                    color: '#ff4466',
-                                    border: '1px solid rgba(255, 68, 102, 0.3)',
-                                    borderRadius: 4,
-                                    cursor: 'pointer',
-                                    flexShrink: 0,
-                                    transition: 'all 0.2s',
-                                    whiteSpace: 'nowrap',
-                                  }}
-                                >
-                                  🗑 Delete
-                                </button>
-                              </div>
-                            )
-                          })}
+                          {/* 自定义问题列表已移入 FreeQuestionSection 统一渲染 */}
 
 
                           {/* 自由问题区域 */}
@@ -2977,6 +2933,7 @@ function MainPageContent() {
                               text: q.text
                             }))}
                             onSaveQuestion={saveFreeQuestion}
+                            onUpdateQuestion={updateFreeQuestion}
                             onQuestionClick={(questionId) => setCurrentQuestionId(questionId)}
                             onDeleteQuestion={deleteFreeQuestion}
                           />
@@ -2986,7 +2943,7 @@ function MainPageContent() {
                   )
                 })}
               </div>
-              <CompletionMilestones answeredCount={answeredCoreCount} />
+              <CompletionMilestones answeredCount={answeredCoreCount + answeredCustomCount} />
             </div>
           </div>
         )}

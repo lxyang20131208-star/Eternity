@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { FreeQuestionSlot, Slot } from './FreeQuestionSlot'
+import { FreeQuestionSlot, Slot, SlotState } from './FreeQuestionSlot'
 import { AddSlotButton } from './AddSlotButton'
 import { SlotEmptyState } from './SlotEmptyState'
 
@@ -15,8 +15,49 @@ type FreeQuestionSectionProps = {
   existingQuestions: Array<{ id: string; text: string }>  // 该阶段已有的正式问题
   onGenerateAI?: (chapterId: string, chapterName: string, existingTexts: string[]) => Promise<string>
   onSaveQuestion?: (text: string, chapter: string) => Promise<string>  // 保存问题到 Supabase，返回 questionId
+  onUpdateQuestion?: (questionId: string, text: string) => Promise<void>  // 更新问题
   onQuestionClick?: (questionId: string) => void  // 点击问题跳转录音
   onDeleteQuestion?: (questionId: string) => Promise<void> // 删除 Supabase 中的问题
+}
+
+function ExistingQuestionItem({
+  question,
+  onUpdateText,
+  onDelete,
+  onClick,
+}: {
+  question: { id: string; text: string }
+  onUpdateText?: (questionId: string, text: string) => Promise<void>
+  onDelete?: (questionId: string) => Promise<void>
+  onClick?: (questionId: string) => void
+}) {
+  const [state, setState] = useState<SlotState>('filled')
+
+  const slot: Slot = {
+    id: question.id,
+    chapterId: '',
+    state: state,
+    question: { text: question.text, source: 'user' },
+    questionId: question.id,
+  }
+
+  const handleUpdate = (newSlot: Slot) => {
+    if (newSlot.state !== state) setState(newSlot.state)
+    if (newSlot.state === 'filled' && newSlot.question?.text && newSlot.question.text !== question.text) {
+      onUpdateText?.(question.id, newSlot.question.text)
+    }
+  }
+
+  return (
+    <FreeQuestionSlot
+      slot={slot}
+      onUpdate={handleUpdate}
+      onRemove={() => onDelete?.(question.id)}
+      onGenerateAI={async () => ''} // 不会用到
+      onQuestionClick={onClick}
+      onDeleteQuestion={onDelete}
+    />
+  )
 }
 
 export function FreeQuestionSection({
@@ -25,6 +66,7 @@ export function FreeQuestionSection({
   existingQuestions,
   onGenerateAI,
   onSaveQuestion,
+  onUpdateQuestion,
   onQuestionClick,
   onDeleteQuestion
 }: FreeQuestionSectionProps) {
@@ -59,26 +101,52 @@ export function FreeQuestionSection({
     localStorage.setItem(storageKey, JSON.stringify(slots))
   }, [slots, chapterId])
 
-  // 将本地存储的自由问题补全 questionId，便于点击跳转
+  // 将本地存储的自由问题补全 questionId，并清理已存在于 existingQuestions 中的槽位
   useEffect(() => {
     if (!hasHydrated.current) return
 
     const textToId = new Map(existingQuestions.map(q => [q.text.trim(), q.id]))
-    let changed = false
-
-    const reconciled = slots.map(slot => {
-      if (slot.state === 'filled' && slot.question?.text && !slot.questionId) {
-        const matchId = textToId.get(slot.question.text.trim())
-        if (matchId) {
-          changed = true
-          return { ...slot, questionId: matchId }
-        }
+    
+    // 过滤掉那些已经在 existingQuestions 中存在（通过 ID 或文本匹配）的 slots
+    // 这样避免界面上出现重复：上面列表显示一个，下面卡片又显示一个
+    const filteredSlots = slots.filter(slot => {
+      // 1. 如果 slot 已经有 questionId，检查是否在 existingQuestions 中存在该 ID
+      if (slot.questionId) {
+        const exists = existingQuestions.some(eq => eq.id === slot.questionId)
+        return !exists // 如果存在，则过滤掉（因为已经显示在上方列表了）
       }
-      return slot
+      
+      // 2. 如果 slot 是 filled 状态但没有 ID，检查文本是否匹配
+      if (slot.state === 'filled' && slot.question?.text) {
+        const matchId = textToId.get(slot.question.text.trim())
+        return !matchId // 如果匹配到 ID，说明已保存，过滤掉
+      }
+      
+      // 其他状态（empty, editing, ai-generating）保留
+      return true
     })
 
-    if (changed) {
-      setSlots(reconciled)
+    // 只有当长度变化时才更新，避免死循环
+    if (filteredSlots.length !== slots.length) {
+      setSlots(filteredSlots)
+    } else {
+       // 如果没有被过滤，尝试回填 ID（针对那些还没来得及同步到 existingQuestions 的情况）
+       // 但通常情况下，一旦同步到 existingQuestions，上面的逻辑就会将其过滤掉
+       let changed = false
+       const reconciled = slots.map(slot => {
+        if (slot.state === 'filled' && slot.question?.text && !slot.questionId) {
+          const matchId = textToId.get(slot.question.text.trim())
+          if (matchId) {
+            changed = true
+            return { ...slot, questionId: matchId }
+          }
+        }
+        return slot
+      })
+      
+      if (changed) {
+        setSlots(reconciled)
+      }
     }
   }, [existingQuestions, slots])
 
@@ -100,6 +168,12 @@ export function FreeQuestionSection({
 
   // 更新槽位（含自动保存到 Supabase）
   const handleUpdateSlot = async (updatedSlot: Slot) => {
+    // 检查是否正在保存，防止重复触发
+    if (updatedSlot.state === 'filled' && !updatedSlot.questionId && onSaveQuestion) {
+       // 这里可以加一个简单的防抖逻辑或者状态锁，但在 React 中最好通过组件内部状态控制
+       // 目前最简单的修复是：如果已经有 questionId 就不要再保存了
+    }
+
     // 如果状态变成 filled 且有问题文本，但还没有 questionId，则保存到 Supabase
     if (
       updatedSlot.state === 'filled' &&
@@ -107,14 +181,20 @@ export function FreeQuestionSection({
       !updatedSlot.questionId &&
       onSaveQuestion
     ) {
+      // 先更新本地状态，防止UI闪烁，但标记为保存中（如果需要）
+      // 这里直接保存
       try {
-        const questionId = await onSaveQuestion(updatedSlot.question.text, chapterName)
-        updatedSlot = { ...updatedSlot, questionId }
+        const questionId = await onSaveQuestion(updatedSlot.question.text, chapterId)
+        // 保存成功后，更新带 ID 的状态
+        setSlots(prev => prev.map(s => s.id === updatedSlot.id ? { ...updatedSlot, questionId } : s))
+        return // 已经更新了，退出
       } catch (error: any) {
         console.error('保存问题到 Supabase 失败:', error?.message || error)
         // 不抛出错误，允许槽位更新为 filled 状态，用户可以稍后重试
       }
     }
+    
+    // 如果没有触发保存逻辑（或者保存失败），则只更新本地状态
     setSlots(prev => prev.map(s => s.id === updatedSlot.id ? updatedSlot : s))
   }
 
@@ -151,7 +231,7 @@ export function FreeQuestionSection({
       >
         <span className="flex items-center gap-2">
           <span className="text-base leading-none opacity-70 group-hover:opacity-100">+</span>
-          <span>自由问题</span>
+          <span style={{ fontSize: '13px', fontWeight: 600 }}>自由问题</span>
           <span className="text-xs text-[var(--muted)]">
             ({filledSlots.length}/{MAX_SLOTS})
           </span>
@@ -164,24 +244,15 @@ export function FreeQuestionSection({
       {/* 展开内容 */}
       {isExpanded && (
         <div className="mt-2 ml-2 pl-3 border-l border-slate-200 space-y-3">
-          {/* 已有自由问题列表（来自 existingQuestions） */}
+          {/* 已有自由问题列表（来自 existingQuestions），使用 ExistingQuestionItem 渲染以支持编辑 */}
           {existingQuestions.map(existingQ => (
-            <div key={existingQ.id} className="flex items-start gap-2 py-2 px-3 rounded hover:bg-slate-100 transition-colors">
-              <span className="mt-0.5 flex-shrink-0 text-[#B89B72]">●</span>
-              <span 
-                onClick={() => onQuestionClick?.(existingQ.id)}
-                className="flex-1 text-sm leading-relaxed text-slate-800 hover:text-[#8B7355] cursor-pointer"
-              >
-                {existingQ.text}
-              </span>
-              <button
-                onClick={() => onDeleteQuestion?.(existingQ.id)}
-                className="px-2 py-0.5 text-xs text-slate-400 hover:text-red-600
-                           hover:bg-red-50 rounded transition-colors flex-shrink-0"
-              >
-                删除
-              </button>
-            </div>
+            <ExistingQuestionItem
+              key={existingQ.id}
+              question={existingQ}
+              onUpdateText={onUpdateQuestion}
+              onDelete={onDeleteQuestion}
+              onClick={onQuestionClick}
+            />
           ))}
 
           {/* 已有槽位列表 */}
@@ -196,7 +267,7 @@ export function FreeQuestionSection({
               onDeleteQuestion={onDeleteQuestion}
               onRetrySave={async (s) => {
                 if (!s.question?.text || !onSaveQuestion) return undefined
-                return onSaveQuestion(s.question.text, chapterName)
+                return onSaveQuestion(s.question.text, chapterId)
               }}
             />
           ))}
@@ -223,24 +294,30 @@ export function FreeQuestionSection({
                     state: 'ai-generating'
                   }
                   setSlots([newSlot])
+                  
+                  // 注意：这里不再自动调用 handleUpdateSlot，也不再在内部直接调用 onSaveQuestion
+                  // 而是通过 FreeQuestionSlot 内部的 onGenerateAI 完成后，触发 onUpdate
+                  // 但由于这里是我们手动插入的 slot，我们需要手动处理一下生成逻辑
+                  
+                  // 修正方案：
+                  // 1. 设置为 ai-generating
+                  // 2. 调用生成接口
+                  // 3. 拿到文本后，设置为 filled（但不带 ID）
+                  // 4. 调用 handleUpdateSlot，利用其统一的保存逻辑
+                  
                   try {
                     const questionText = await handleGenerateAI()
-                    let questionId: string | undefined
-                    // 保存到 Supabase
-                    if (onSaveQuestion) {
-                      try {
-                        questionId = await onSaveQuestion(questionText, chapterName)
-                      } catch (e: any) {
-                        console.error('保存 AI 生成问题到 Supabase 失败:', e?.message || e)
-                        // 继续执行，允许用户稍后重试保存
-                      }
-                    }
-                    setSlots([{
+                    
+                    const filledSlot: Slot = {
                       ...newSlot,
                       state: 'filled',
-                      question: { text: questionText, source: 'ai' },
-                      questionId
-                    }])
+                      question: { text: questionText, source: 'ai' }
+                      // 注意：不设置 questionId，让 handleUpdateSlot 去处理保存
+                    }
+                    
+                    // 调用统一的更新处理函数，它会负责保存到 Supabase
+                    handleUpdateSlot(filledSlot)
+                    
                   } catch (error) {
                     console.error('AI 生成失败:', error)
                     setSlots([{ ...newSlot, state: 'empty' }])
