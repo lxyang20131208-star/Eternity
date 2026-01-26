@@ -32,6 +32,7 @@ import {
   type BookChapter,
   type ChapterPhoto,
 } from '@/lib/vivliostyleBookGenerator';
+import BookCoverGenerator from '@/app/components/BookCoverGenerator';
 
 // Helper: Convert rich content to HTML string
 function renderRichToHtml(content: RichTextContent | undefined, fallbackText: string): string {
@@ -184,6 +185,9 @@ export default function ExportPage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+
+  // State: Book Cover Generator Modal
+  const [showCoverGenerator, setShowCoverGenerator] = useState(false);
 
   // Initialize auth and project
   useEffect(() => {
@@ -688,7 +692,9 @@ export default function ExportPage() {
     }
 
     // If we have expanded chapters, use the selected export engine
+    // (Restored logic: Prioritize Smart Export/Vivliostyle)
     if (expandedChapters && expandedChapters.length > 0) {
+      console.log('Starting smart export with engine:', exportEngine);
       await handleSmartExport();
       return;
     }
@@ -1928,9 +1934,9 @@ export default function ExportPage() {
             </div>
           </div>
 
-          {/* Print Configuration */}
+          {/* Print Configuration - Hidden, default A5 */}
           {exportFormat === 'pdf' && expandedChapters && (
-            <div style={{ marginBottom: 24 }}>
+            <div style={{ marginBottom: 24, display: 'none' }}>
               <label style={{ display: 'block', fontSize: 14, marginBottom: 8 }}>
                 📐 印刷配置
               </label>
@@ -2009,9 +2015,9 @@ export default function ExportPage() {
             </div>
           )}
 
-          {/* Export Engine Selection */}
+          {/* Export Engine Selection - Hidden, default Vivliostyle */}
           {exportFormat === 'pdf' && expandedChapters && (
-            <div style={{ marginBottom: 24 }}>
+            <div style={{ marginBottom: 24, display: 'none' }}>
               <label style={{ display: 'block', fontSize: 14, marginBottom: 8 }}>
                 🔧 导出引擎
               </label>
@@ -2348,18 +2354,20 @@ export default function ExportPage() {
               </button>
           </div>
 
-          {/* Options */}
-          <div style={{ marginBottom: 24 }}>
+          {/* Options - Hidden as per user request */}
+          <div style={{ marginBottom: 24, display: 'none' }}>
             <label style={{ display: 'block', fontSize: 14, marginBottom: 12 }}>
               ⚙️ 导出选项
             </label>
             {[
               { label: '包含照片', checked: includePhotos, setter: setIncludePhotos },
+              /* Hidden as per user request
               {
                 label: '包含家族关系图',
                 checked: includeFamilyTree,
                 setter: setIncludeFamilyTree,
               },
+              */
               { label: '生成目录', checked: includeTOC, setter: setIncludeTOC },
             ].map(({ label, checked, setter }) => (
               <label
@@ -2393,7 +2401,7 @@ export default function ExportPage() {
           </div>
 
           {/* Preview & Export Buttons */}
-          <div style={{ display: 'flex', gap: 12 }}>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
             <button
               onClick={() => {
                 const historySection = document.getElementById('pdf-history-section');
@@ -2428,6 +2436,14 @@ export default function ExportPage() {
               {exporting ? '正在导出...' : '🚀 开始导出'}
             </button>
           </div>
+
+          {/* Book Cover Generator Button */}
+          <button
+            onClick={() => setShowCoverGenerator(true)}
+            className="w-full px-5 py-3.5 bg-white border border-purple-200 hover:bg-purple-50 text-purple-700 rounded-xl transition-all duration-200 font-medium shadow-sm flex items-center justify-center gap-2"
+          >
+            📚 生成图书封面
+          </button>
 
           {/* Progress */}
           {exporting && (
@@ -3242,6 +3258,15 @@ export default function ExportPage() {
           </div>
         </div>
       )}
+
+      {/* Book Cover Generator Modal */}
+      <BookCoverGenerator
+        isOpen={showCoverGenerator}
+        onClose={() => setShowCoverGenerator(false)}
+        bookTitle={bookTitle}
+        authorName={authorName}
+        projectId={projectId}
+      />
         </div>
       </div>
     </>

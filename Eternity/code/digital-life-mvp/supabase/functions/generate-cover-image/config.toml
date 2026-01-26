@@ -1,0 +1,3 @@
+# Disable JWT verification for CORS preflight
+[function]
+verify_jwt = false

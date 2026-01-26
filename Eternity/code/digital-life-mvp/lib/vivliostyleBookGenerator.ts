@@ -491,6 +491,12 @@ function generateVivliostyleCSS(
   config: BookConfig,
   pageSize: { width: number; height: number }
 ): string {
+  console.log('[generateVivliostyleCSS] Config used:', {
+    pageSize: config.pageSize,
+    actualSize: pageSize,
+    margins: config.margins
+  });
+
   const { margins, fontSize, lineHeight } = config;
 
   // 计算版心尺寸
@@ -500,34 +506,8 @@ function generateVivliostyleCSS(
     /* ========== CSS Paged Media 规范 ========== */
     @page {
       size: ${pageSize.width}mm ${pageSize.height}mm;
-      margin: ${margins.top}mm ${margins.outer}mm ${margins.bottom}mm ${margins.inner}mm;
-
-      /* 页脚页码 */
-      @bottom-center {
-        content: counter(page);
-        font-size: 10pt;
-        color: #333;
-      }
-    }
-
-    /* 封面页不显示页码 */
-    @page cover {
-      @bottom-center { content: none; }
-    }
-
-    /* 目录页使用罗马数字 */
-    @page toc {
-      @bottom-center {
-        content: counter(page, lower-roman);
-      }
-    }
-
-    /* 章节起始页 - 页码在底部居中 */
-    @page chapter-start {
-      @bottom-center {
-        content: counter(page);
-        font-size: 10pt;
-      }
+      /* 移除 @page 边距，改用 body padding 模拟 */
+      margin: 0; 
     }
 
     /* ========== 基础样式 ========== */
@@ -547,19 +527,26 @@ function generateVivliostyleCSS(
       line-height: ${lineHeight};
       color: #1a1a1a;
       text-align: justify;
-      background: #e8e8e8;
-      padding: 20px;
-      counter-reset: page 1;
+      background: white;
+      /* 使用 padding 模拟页边距，这是最稳妥的兼容方案 */
+      padding: ${margins.top}mm ${margins.outer}mm ${margins.bottom}mm ${margins.inner}mm;
+      width: ${pageSize.width}mm;
+      min-height: ${pageSize.height}mm;
+      margin: 0 auto;
     }
 
     /* ========== 屏幕预览样式 ========== */
     @media screen {
       .book-content {
-        max-width: ${pageSize.width}mm;
+        width: ${pageSize.width}mm;
+        max-width: none;
         margin: 0 auto;
         background: white;
         box-shadow: 0 4px 20px rgba(0,0,0,0.15);
         padding: ${margins.top}mm ${margins.outer}mm ${margins.bottom}mm ${margins.inner}mm;
+        /* 在屏幕上模拟物理尺寸 */
+        min-height: ${pageSize.height}mm;
+        box-sizing: border-box; /* 关键修复：确保 padding 包含在 width 内 */
       }
 
       .page-break {
@@ -777,24 +764,35 @@ function generateVivliostyleCSS(
 
     /* ========== 打印优化 ========== */
     @media print {
+      /* 强制设置页面尺寸，边距设为0 */
+      @page {
+        size: ${pageSize.width}mm ${pageSize.height}mm;
+        margin: 0 !important;
+      }
+
       html, body {
+        width: ${pageSize.width}mm !important;
         height: auto !important;
         overflow: visible !important;
-        min-height: 100%;
+        background: white !important;
+        margin: 0 !important;
+        /* 关键：打印时使用 padding 作为边距 */
+        padding: ${margins.top}mm ${margins.outer}mm ${margins.bottom}mm ${margins.inner}mm !important;
       }
 
-      body {
-        background: white;
-        padding: 0;
-      }
-
+      /* 强制内容容器尺寸 */
       .book-content {
-        max-width: none;
-        padding: 0;
+        width: 100% !important;
+        max-width: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
         box-shadow: none;
         overflow: visible !important;
       }
 
+      /* 如果浏览器忽略 @page margin，我们可以尝试用 padding 模拟，但通常 @page 更准确 */
+      /* 备选方案：如果用户反馈边距还是不对，可以尝试将 padding 移到 body 上，但这会影响分页 */
+      
       .page-break {
         display: none;
       }

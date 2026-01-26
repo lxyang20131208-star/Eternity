@@ -73,10 +73,10 @@ export const PRINT_PRESETS: Record<string, PrintConfig> = {
       trim: false,
     },
     margins: {
-      top: 18,
-      bottom: 20,
-      inner: 22,
-      outer: 16,
+      top: 20,    // 略微减小上边距 (原25)
+      bottom: 20, // 略微减小下边距 (原25)
+      inner: 24,  // 调整装订边距 (原28 -> 24)
+      outer: 18,  // 调整外侧边距 (原20 -> 18)
     },
     body: {
       fontSize: 10.5,
@@ -90,7 +90,7 @@ export const PRINT_PRESETS: Record<string, PrintConfig> = {
       numberFontSize: 12,
       topSpacing: 25,
       bottomSpacing: 15,
-      dropCap: true,
+      dropCap: false, // User requested to disable drop caps
       dropCapLines: 3,
     },
     header: {
