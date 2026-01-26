@@ -114,13 +114,24 @@ export default function VisTimeline({ events, onEventClick, selectedEventId }: T
 
     const timeline = timelineInstanceRef.current;
     if (!timeline) return;
-    timeline.setSelection([selectedEventId], {
-      focus: true,
-      animation: {
-        duration: 500,
-        easingFunction: 'easeInOutQuad',
-      },
-    });
+    
+    try {
+      timeline.setSelection([selectedEventId], {
+        focus: true,
+        animation: {
+          duration: 500,
+          easingFunction: 'easeInOutQuad',
+        },
+      });
+    } catch (error) {
+      console.warn('Failed to set selection on timeline:', error);
+      // Fallback: just set selection without focus
+      try {
+        timeline.setSelection([selectedEventId]);
+      } catch (e) {
+        console.warn('Failed to set selection without focus:', e);
+      }
+    }
   }, [selectedEventId, isReady]);
 
   return (

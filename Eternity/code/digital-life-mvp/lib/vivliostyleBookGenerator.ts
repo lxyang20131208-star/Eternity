@@ -3,7 +3,8 @@
  * 使用 CSS Paged Media 规范，支持智能分页和图片排版
  */
 
-import { supabase } from './supabaseClient';
+import { supabase as defaultSupabase } from './supabaseClient';
+import { SupabaseClient } from '@supabase/supabase-js';
 
 // ============ 类型定义 ============
 
@@ -66,8 +67,10 @@ export async function getChapterPhotos(
   projectId: string,
   sourceIds: string[],
   outlineId?: string,
-  chapterId?: string
+  chapterId?: string,
+  supabaseClient?: SupabaseClient
 ): Promise<ChapterPhoto[]> {
+  const supabase = supabaseClient || defaultSupabase;
   try {
     const questionIds = new Set<string>();
 
@@ -182,7 +185,8 @@ export async function getChapterPhotos(
  */
 export async function getAllChapterPhotos(
   projectId: string,
-  chapters: BookChapter[]
+  chapters: BookChapter[],
+  supabaseClient?: SupabaseClient
 ): Promise<Map<number, ChapterPhoto[]>> {
   const photoMap = new Map<number, ChapterPhoto[]>();
 
@@ -192,7 +196,8 @@ export async function getAllChapterPhotos(
       projectId,
       chapter.sourceIds,
       chapter.outlineId,
-      chapter.chapterId
+      chapter.chapterId,
+      supabaseClient
     );
     photoMap.set(i, photos);
   }
@@ -208,20 +213,16 @@ export async function getAllChapterPhotos(
 export function generateVivliostyleHTML(
   config: BookConfig,
   chapters: BookChapter[],
-  chapterPhotos: Map<number, ChapterPhoto[]>
+  chapterPhotos: Map<number, ChapterPhoto[]>,
+  mode: 'client' | 'server' = 'client'
 ): string {
   const pageSize = PAGE_SIZES[config.pageSize];
   const photoSizeConfig = PHOTO_SIZES[config.photoSize];
 
   const css = generateVivliostyleCSS(config, pageSize);
 
-  let html = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <title>${escapeHtml(config.title)}</title>
-  <style>
-${css}
+  // Client-side specific scripts and styles
+  const clientScripts = mode === 'client' ? `
     /* Loading Overlay 样式 */
     #loading-overlay {
       position: fixed;
@@ -305,7 +306,9 @@ ${css}
       #loading-overlay { display: none !important; }
       #status-bar { display: none !important; }
     }
-  </style>
+  ` : '';
+
+  const clientJS = mode === 'client' ? `
   <script>
     // 定义全局变量
     let overlay, progressFill, loadingText, printBtn;
@@ -441,9 +444,9 @@ ${css}
         }, 500);
       }
     }
-  </script>
-</head>
-<body>
+  </script>` : '';
+
+  const overlayHTML = mode === 'client' ? `
   <div id="loading-overlay">
     <div class="loading-content">
       <div class="spinner-large"></div>
@@ -459,7 +462,21 @@ ${css}
     <button id="manual-print-btn">立即打印 (Ctrl+P)</button>
     <button onclick="window.closePreview()" style="margin-left:10px; background:#e74c3c; border:none; color:white; padding:4px 12px; border-radius:4px; cursor:pointer;">关闭预览</button>
   </div>
+  ` : '';
 
+  let html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>${escapeHtml(config.title)}</title>
+  <style>
+${css}
+${clientScripts}
+  </style>
+${clientJS}
+</head>
+<body>
+${overlayHTML}
   <div class="book-content">
 `;
 

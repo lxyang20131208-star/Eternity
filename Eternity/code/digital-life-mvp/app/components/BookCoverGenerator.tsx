@@ -338,7 +338,8 @@ export default function BookCoverGenerator({
           <h3 style={{ fontSize: 16, marginBottom: 16, color: '#4B5563' }}>封面预览</h3>
           <div
             style={{
-              background: coverImage ? `url(${coverImage})` : '#F3F4F6',
+              backgroundImage: coverImage ? `url(${coverImage})` : undefined,
+              backgroundColor: coverImage ? undefined : '#F3F4F6',
               backgroundSize: 'cover',
               backgroundPosition: 'center',
               borderRadius: 8,
@@ -428,6 +429,31 @@ export default function BookCoverGenerator({
               📤 上传图片
             </button>
 
+            {/* 预设背景按钮 */}
+            <button
+              onClick={() => setShowPresetSection(!showPresetSection)}
+              style={{
+                flex: 1,
+                padding: '14px 20px',
+                background: showPresetSection ? '#EEF2FF' : '#FFFFFF',
+                border: showPresetSection ? '1px solid #818CF8' : '1px solid #D1D5DB',
+                borderRadius: 8,
+                color: showPresetSection ? '#4F46E5' : '#374151',
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                if (!showPresetSection) e.currentTarget.style.background = '#F9FAFB';
+              }}
+              onMouseLeave={(e) => {
+                if (!showPresetSection) e.currentTarget.style.background = '#FFFFFF';
+              }}
+            >
+              🎨 选择预设背景
+            </button>
+
             {/* AI 生成按钮 */}
             <button
               onClick={() => setShowAISection(!showAISection)}
@@ -461,6 +487,56 @@ export default function BookCoverGenerator({
             style={{ display: 'none' }}
             onChange={handleImageUpload}
           />
+
+          {/* 预设背景区域 */}
+          {showPresetSection && (
+            <div
+              style={{
+                background: '#F9FAFB',
+                border: '1px solid #E5E7EB',
+                borderRadius: 8,
+                padding: 20,
+                marginTop: 16,
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+                gap: 12,
+              }}
+            >
+              {presetBackgrounds.map((bg) => (
+                <button
+                  key={bg.name}
+                  onClick={() => handlePresetSelect(bg.gradient)}
+                  style={{
+                    height: 80,
+                    borderRadius: 8,
+                    background: bg.gradient,
+                    border: 'none',
+                    cursor: 'pointer',
+                    position: 'relative',
+                    overflow: 'hidden',
+                    transition: 'transform 0.2s',
+                  }}
+                  title={bg.name}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                >
+                  <span style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    background: 'rgba(0,0,0,0.4)',
+                    color: '#fff',
+                    fontSize: 12,
+                    padding: '4px',
+                    textAlign: 'center',
+                  }}>
+                    {bg.name}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* AI 生成区域 */}
           {showAISection && (

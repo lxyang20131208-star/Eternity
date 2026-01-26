@@ -1046,23 +1046,20 @@ function MainPageContent() {
 
         if (dbErr) throw dbErr
 
-        // Save attached photos
+        // Link previously uploaded photos to this session
         if (sessionPhotos.length > 0) {
-          const photoRecords = sessionPhotos.map((photo, idx) => ({
-            answer_session_id: sessionId,
-            project_id: projectId,
-            question_id: currentQuestionId,
-            photo_url: photo.url,
-            person_names: photo.persons.length > 0 ? photo.persons : null,
-            display_order: idx,
-          }))
-
+          // Update photos that were saved earlier (when uploaded) with the session_id
           const { error: photoErr } = await supabase
             .from('answer_photos')
-            .insert(photoRecords)
+            .update({
+              answer_session_id: sessionId,
+            })
+            .eq('project_id', projectId)
+            .eq('question_id', currentQuestionId)
+            .is('answer_session_id', null)
 
           if (photoErr) {
-            console.error('Photo save error:', photoErr)
+            console.error('Photo link error:', photoErr)
             // Don't throw - photos are optional
           }
         }
@@ -1188,8 +1185,28 @@ function MainPageContent() {
       const persons = photoPersonTags.trim().split(',').map(p => p.trim()).filter(p => p)
       setSessionPhotos(prev => [...prev, { url: signed.signedUrl, persons }])
       setPhotoPersonTags('')
+
+      // Save photo to database immediately (without session_id, will be linked when answer is submitted)
+      const displayOrder = sessionPhotos.length
       
-      showToast('Photo added', 'success')
+      const { error: saveErr } = await supabase
+        .from('answer_photos')
+        .insert({
+          answer_session_id: null,
+          project_id: projectId,
+          question_id: currentQuestionId,
+          photo_url: signed.signedUrl,
+          person_names: persons.length > 0 ? persons : null,
+          display_order: displayOrder,
+          storage_path: photoPath,
+        })
+
+      if (saveErr) {
+        console.error('Photo database save error:', saveErr)
+        // Still show success if storage upload worked
+      }
+      
+      showToast('Photo saved successfully', 'success')
     } catch (err: any) {
       console.error('Photo upload error:', err)
       showToast('Photo upload failed', 'error')
@@ -2201,8 +2218,6 @@ function MainPageContent() {
                           {/* Audio Player */}
                           <AudioPlayer
                             audioObjectKey={session.audio_object_key}
-                            audioFilePath={session.audio_file_path}
-                            recordingMethod={session.recording_method}
                           />
 
                           {/* Transcript with Edit for Latest */}

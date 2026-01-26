@@ -292,6 +292,12 @@ function InvitePage() {
     console.log('Has audio blob:', !!audioBlob)
     console.log('Comment text:', commentText)
 
+    // Check if invite is loaded
+    if (!invite) {
+      showToast('Invite not loaded', 'error')
+      return
+    }
+
     // Check if user is authenticated
     if (!isAuthenticated) {
       console.log('Not authenticated, showing auth modal')

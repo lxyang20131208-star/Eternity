@@ -178,7 +178,7 @@ export default function TimelinePage() {
         if (!selectedPlaces.some((id) => eventPlaceIds.includes(id))) return false;
       }
       if (selectedTags.length > 0) {
-        if (!selectedTags.some((tag) => event.tags.includes(tag))) return false;
+        if (!selectedTags.some((tag) => event.tags?.includes(tag))) return false;
       }
       return true;
     });
@@ -191,18 +191,24 @@ export default function TimelinePage() {
       const startDate = timeRef?.start_date ? new Date(timeRef.start_date) : new Date();
       const endDate = timeRef?.end_date ? new Date(timeRef.end_date) : undefined;
 
-      return {
+      const item: any = {
         id: event.id,
         content: event.title || '无标题事件',
         start: startDate,
-        end: endDate,
-        type: endDate ? ('range' as const) : ('box' as const),
+        type: endDate ? ('range' as const) : ('point' as const),
         className: event.verified ? 'verified' : 'unverified',
       };
+
+      // Only include end if it's a range event
+      if (endDate) {
+        item.end = endDate;
+      }
+
+      return item;
     });
   }, [filteredEvents]);
 
-  const allTags = Array.from(new Set(allEvents.flatMap((e) => e.tags)));
+  const allTags = Array.from(new Set(allEvents.flatMap((e) => e.tags || [])));
 
   function toggleEvidence(eventId: string) {
     setExpandedEvents((prev) => {
@@ -469,7 +475,7 @@ export default function TimelinePage() {
                         {event.summary && <p className="text-gray-700 mb-3">{event.summary}</p>}
 
                         {/* Tags */}
-                        {event.tags.length > 0 && (
+                        {event.tags && event.tags.length > 0 && (
                           <div className="flex flex-wrap gap-2 mb-3">
                             {event.tags.map((tag) => (
                               <span key={tag} className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
@@ -587,7 +593,7 @@ function EventDetailPanel({
         </div>
       )}
 
-      {event.tags.length > 0 && (
+      {event.tags && event.tags.length > 0 && (
         <div className="mb-4">
           <div className="text-sm font-semibold text-gray-700 mb-2">🏷️ 标签</div>
           <div className="flex flex-wrap gap-2">

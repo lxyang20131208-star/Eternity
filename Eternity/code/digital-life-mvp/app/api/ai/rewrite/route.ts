@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
       'default': '用经典传记的平衡叙事风格，兼顾文学性与可读性。',
       'hemingway': '用海明威的风格：简洁有力，冰山理论，用最少的文字传达最深的情感。避免过多的修饰词，用简单的动词和名词，让情感隐含在细节中。',
       'capote': '用杜鲁门·卡波特的风格：温情细腻，如《圣诞忆旧集》般温暖怀旧的笔触。注重感官细节，用温暖的语调回忆往事。',
-      'zweig': '用斯蒂芬·茨威格的风格：深入人物内心，细腻的心理描写，戏剧性的转折。关注情感变化和心理活动。',
+      'zweig': '用斯蒂芬·茨威格的风格：深入人物内心，细腻的心理描写，戏剧性的转折。关注��感变化和心理活动。',
       'zhangailing': '用张爱玲的风格：华丽苍凉，独特的比喻，对人性幽微处的洞察。用精致的语言表达岁月的流逝和记忆的珍贵。',
       'didion': '用琼·狄迪恩的风格：冷静克制，精确观察，在平静叙述中蕴含深情。用客观冷静的语调叙述，但情感深沉。',
       'kundera': '用米兰·昆德拉的风格：哲思深邃，在叙事中穿插对生命本质的思考。将个人经历上升到哲学思考。',
@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
         ],
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 2000,
+          maxOutputTokens: 4000,
           responseMimeType: 'application/json'
         }
       }),

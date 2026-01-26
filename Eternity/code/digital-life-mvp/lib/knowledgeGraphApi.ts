@@ -155,6 +155,7 @@ export async function getEvents(projectId: string, filters?: TimelineFilters): P
 
   return events.map((event) => ({
     ...event,
+    tags: event.tags || [],
     timeRef: event.time_refs,
     people: eventPeople?.filter((ep) => ep.event_id === event.id).map((ep) => ep.people as any) || [],
     places: eventPlaces?.filter((ep) => ep.event_id === event.id).map((ep) => ep.places as any) || [],
