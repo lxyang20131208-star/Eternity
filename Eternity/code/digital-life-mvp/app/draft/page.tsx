@@ -1,9 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { useState, useRef, useEffect } from 'react'
-import { supabase } from '@/lib/supabaseClient'
 
 type DemoStep = 'idle' | 'recording' | 'transcribing' | 'style' | 'rewriting' | 'book' | 'content_page'
 
@@ -20,10 +18,6 @@ const AUTHOR_STYLES = {
 }
 
 export default function DraftPage() {
-  const router = useRouter()
-  const [userId, setUserId] = useState<string | null>(null)
-  const [projectId, setProjectId] = useState<string | null>(null)
-
   const [answer, setAnswer] = useState('')
   const [step, setStep] = useState<DemoStep>('idle')
   const [recordingTime, setRecordingTime] = useState(0)
@@ -60,41 +54,6 @@ export default function DraftPage() {
     serif: '"Source Serif 4", "Noto Serif SC", "Songti SC", Georgia, serif',
     sans: '"Inter", "Noto Sans SC", -apple-system, sans-serif',
   }
-
-  // Bootstrap auth + project
-  useEffect(() => {
-    async function bootstrap() {
-      try {
-        const { data: { user }, error: userErr } = await supabase.auth.getUser()
-        if (userErr) {
-          console.warn('Auth fetch failed, continuing as guest:', userErr.message)
-          return
-        }
-        if (!user) return
-        setUserId(user.id)
-
-        const { data: list, error: selErr } = await supabase
-          .from('projects')
-          .select('id')
-          .eq('owner_id', user.id)
-          .eq('name', 'My Vault')
-          .limit(1)
-
-        if (selErr) {
-          console.warn('Project fetch failed:', selErr.message)
-          return
-        }
-
-        if (list?.[0]?.id) {
-          setProjectId(list[0].id)
-        }
-      } catch (e: any) {
-        console.warn('Bootstrap error:', e?.message ?? e)
-      }
-    }
-
-    bootstrap()
-  }, [])
 
   // 清理媒体流
   useEffect(() => {
@@ -175,160 +134,39 @@ export default function DraftPage() {
     try {
       setStep('transcribing')
 
-      if (userId && projectId) {
-        await handleTranscriptionWithAuth(recorder)
-        return
-      }
-
-      const { data: { session }, error: signUpError } = await supabase.auth.signUp({
-        email: `draft_${crypto.randomUUID()}@temp.user`,
-        password: crypto.randomUUID(),
-        options: {
-          data: {
-            is_temporary: true,
-            created_for: 'draft_demo'
-          }
-        }
-      })
-
-      if (signUpError || !session) {
-        await handleMockTranscription()
-        return
-      }
-
-      const tempUserId = session.user.id
-      setUserId(tempUserId)
-
-      const { data: newProject, error: projectError } = await supabase
-        .from('projects')
-        .insert({
-          owner_id: tempUserId,
-          name: 'Draft Demo',
-        })
-        .select('id')
-        .single()
-
-      if (projectError || !newProject) {
-        await handleMockTranscription()
-        return
-      }
-
-      const tempProjectId = newProject.id
+      // 直接使用本地 API 进行转写，不需要认证
       const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' })
-      const sessionId = crypto.randomUUID()
-      const now = new Date()
-      const yyyy = now.getFullYear()
-      const mm = String(now.getMonth() + 1).padStart(2, '0')
-      const objectPath = `projects/${tempProjectId}/audio_raw/${yyyy}/${mm}/${sessionId}.webm`
+      
+      console.log('[Draft] Starting transcription, blob size:', blob.size, 'type:', blob.type)
 
-      const { error: uploadError } = await supabase.storage.from('vault').upload(objectPath, blob, {
-        contentType: blob.type || 'audio/webm',
-        upsert: false,
+      const formData = new FormData()
+      formData.append('audio', blob, 'recording.webm')
+
+      const response = await fetch('/api/draft/transcribe', {
+        method: 'POST',
+        body: formData,
       })
-      if (uploadError) throw uploadError
 
-      const { error: dbErr } = await supabase.from('answer_sessions').insert({
-        id: sessionId,
-        project_id: tempProjectId,
-        question_id: 'draft_demo',
-        audio_object_key: objectPath,
-        status: 'uploaded',
-        round_number: 0,
-      })
-      if (dbErr) throw dbErr
-
-      const { error: transcribeErr } = await supabase.functions.invoke('transcribe_session', {
-        body: { session_id: sessionId },
-      })
-      if (transcribeErr) throw transcribeErr
-
-      let attempts = 0
-      const maxAttempts = 90
-
-      while (attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 2000))
-
-        const { data: sessionData, error: queryError } = await supabase
-          .from('answer_sessions')
-          .select('transcript_text, status, error_text')
-          .eq('id', sessionId)
-          .single()
-
-        if (sessionData?.transcript_text) {
-          setTranscribedText(sessionData.transcript_text)
-          setAnswer(sessionData.transcript_text)
-          setStep('style')
-          return
-        }
-
-        if (sessionData?.status === 'failed') {
-          throw new Error(sessionData?.error_text || '转写失败')
-        }
-        attempts++
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        console.error('[Draft] Transcription API error:', response.status, errorData)
+        throw new Error(errorData.error || '转写失败')
       }
-      throw new Error('转写超时')
+
+      const data = await response.json()
+      
+      if (data.transcript) {
+        console.log('[Draft] Transcription successful, length:', data.transcript.length)
+        setTranscribedText(data.transcript)
+        setAnswer(data.transcript)
+        setStep('style')
+      } else {
+        throw new Error('转写结果为空')
+      }
     } catch (e: any) {
+      console.error('[Draft] Transcription failed:', e)
+      // 如果 API 失败，回退到模拟转写
       await handleMockTranscription()
-    }
-  }
-
-  async function handleTranscriptionWithAuth(recorder: MediaRecorder) {
-    try {
-      setStep('transcribing')
-      const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' })
-      const sessionId = crypto.randomUUID()
-      const now = new Date()
-      const yyyy = now.getFullYear()
-      const mm = String(now.getMonth() + 1).padStart(2, '0')
-      const objectPath = `projects/${projectId}/audio_raw/${yyyy}/${mm}/${sessionId}.webm`
-
-      const { error: uploadError } = await supabase.storage.from('vault').upload(objectPath, blob, {
-        contentType: blob.type || 'audio/webm',
-        upsert: false,
-      })
-      if (uploadError) throw uploadError
-
-      const { error: dbErr } = await supabase.from('answer_sessions').insert({
-        id: sessionId,
-        project_id: projectId,
-        question_id: 'draft_demo',
-        audio_object_key: objectPath,
-        status: 'uploaded',
-        round_number: 0,
-      })
-      if (dbErr) throw dbErr
-
-      const { error: transcribeErr } = await supabase.functions.invoke('transcribe_session', {
-        body: { session_id: sessionId },
-      })
-      if (transcribeErr) throw transcribeErr
-
-      let attempts = 0
-      const maxAttempts = 90
-
-      while (attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 2000))
-        const { data: session, error: queryError } = await supabase
-          .from('answer_sessions')
-          .select('transcript_text, status, error_text')
-          .eq('id', sessionId)
-          .single()
-
-        if (session?.transcript_text) {
-          setTranscribedText(session.transcript_text)
-          setAnswer(session.transcript_text)
-          setStep('style')
-          return
-        }
-        if (session?.status === 'failed') {
-          throw new Error(session?.error_text || '转写失败')
-        }
-        attempts++
-      }
-      throw new Error('转写超时')
-    } catch (e: any) {
-      setError(e?.message ?? '转写失败')
-      setStep('idle')
     }
   }
 
