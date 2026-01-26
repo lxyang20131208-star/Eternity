@@ -24,9 +24,22 @@ export default function BookCoverGenerator({
   const [isSaving, setIsSaving] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [showAISection, setShowAISection] = useState(false);
+  const [showPresetSection, setShowPresetSection] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // 预设背景模板
+  const presetBackgrounds = [
+    { name: '深蓝夜空', gradient: 'linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #3b82f6 100%)' },
+    { name: '温暖日落', gradient: 'linear-gradient(135deg, #be123c 0%, #e11d48 50%, #f59e0b 100%)' },
+    { name: '森林绿意', gradient: 'linear-gradient(135deg, #14532d 0%, #166534 50%, #15803d 100%)' },
+    { name: '复古棕色', gradient: 'linear-gradient(135deg, #431407 0%, #78350f 50%, #a16207 100%)' },
+    { name: '优雅紫色', gradient: 'linear-gradient(135deg, #4c1d95 0%, #6d28d9 50%, #8b5cf6 100%)' },
+    { name: '海洋蓝', gradient: 'linear-gradient(135deg, #0c4a6e 0%, #0369a1 50%, #0ea5e9 100%)' },
+    { name: '暗夜黑', gradient: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)' },
+    { name: '玫瑰金', gradient: 'linear-gradient(135deg, #881337 0%, #be123c 50%, #e11d48 100%)' },
+  ];
 
   if (!isOpen) return null;
 
@@ -46,6 +59,41 @@ export default function BookCoverGenerator({
       setCoverImage(event.target?.result as string);
     };
     reader.readAsDataURL(file);
+  };
+
+  // 选择预设背景
+  const handlePresetSelect = (gradient: string) => {
+    // 创建一个临时 canvas 来生成渐变图片
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = 800;
+    tempCanvas.height = 1200;
+    const ctx = tempCanvas.getContext('2d');
+
+    if (ctx) {
+      // 解析渐变字符串并绘制
+      const gradientMatch = gradient.match(/linear-gradient\((\d+)deg,\s*(.+)\)/);
+      if (gradientMatch) {
+        const [, , colors] = gradientMatch;
+        const colorStops = colors.split(',').map(c => c.trim());
+
+        // 创建渐变
+        const grad = ctx.createLinearGradient(0, 0, tempCanvas.width, tempCanvas.height);
+        colorStops.forEach((stop, idx) => {
+          const parts = stop.split(/\s+/);
+          const color = parts[0];
+          const position = parts[1] ? parseFloat(parts[1]) / 100 : idx / (colorStops.length - 1);
+          grad.addColorStop(position, color);
+        });
+
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+      }
+
+      // 转换为 data URL
+      const dataUrl = tempCanvas.toDataURL('image/png');
+      setCoverImage(dataUrl);
+      setShowPresetSection(false);
+    }
   };
 
   // 使用 AI 生成图片（调用 Gemini API）
@@ -72,10 +120,12 @@ export default function BookCoverGenerator({
         setCoverImage(data.imageUrl);
         setShowAISection(false);
         setAiPrompt('');
+      } else {
+        throw new Error('未收到图片数据');
       }
     } catch (error: any) {
       console.error('AI 生成失败:', error);
-      alert('AI 生成图片失败: ' + (error.message || '未知错误'));
+      alert('AI 生成功能暂时不可用，请使用"选择预设背景"或"上传图片"功能。\n\n技术信息: ' + (error.message || '未知错误'));
     } finally {
       setIsGeneratingAI(false);
     }

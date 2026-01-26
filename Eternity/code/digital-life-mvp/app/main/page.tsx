@@ -1733,7 +1733,7 @@ function MainPageContent() {
                   }}>
                     {currentQuestion.text}
                   </h3>
-                  
+
                   {/* Follow-up hints */}
                   {followUpQuestions.length > 0 && (
                     <div style={{
@@ -1797,6 +1797,45 @@ function MainPageContent() {
                       NEXT ▷
                     </button>
                   </div>
+
+                  {/* Round 2 Button - Shows when user has answered >= 70 questions */}
+                  {(answeredCoreCount + answeredCustomCount) >= UNLOCK_THRESHOLDS.secondRound && (
+                    <Link href="/round2" style={{ textDecoration: 'none', display: 'block', marginTop: 12 }}>
+                      <div style={{
+                        padding: '12px 16px',
+                        background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(99, 102, 241, 0.1))',
+                        border: '1px solid rgba(139, 92, 246, 0.3)',
+                        borderRadius: 8,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(99, 102, 241, 0.15))';
+                        e.currentTarget.style.borderColor = 'rgba(139, 92, 246, 0.5)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(99, 102, 241, 0.1))';
+                        e.currentTarget.style.borderColor = 'rgba(139, 92, 246, 0.3)';
+                      }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{ fontSize: 16 }}>🎯</span>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#6366F1', marginBottom: 2 }}>
+                              深度补充问题已解锁
+                            </div>
+                            <div style={{ fontSize: 11, color: '#8B7355' }}>
+                              点击进入 Round 2 添加更多细节和金句
+                            </div>
+                          </div>
+                        </div>
+                        <span style={{ fontSize: 14, color: '#6366F1', fontWeight: 600 }}>→</span>
+                      </div>
+                    </Link>
+                  )}
                 </div>
               )}
 
