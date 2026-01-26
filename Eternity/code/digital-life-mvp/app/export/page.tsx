@@ -168,10 +168,11 @@ export default function ExportPage() {
   interface PdfHistory {
     id: string;
     fileName: string;
-    fileUrl: string;
+    fileUrl?: string; // Optional: local exports may not have a URL
     template: string;
     version: number;
     createdAt: string;
+    status: 'cloud_stored' | 'local_download';
   }
   const [pdfHistory, setPdfHistory] = useState<PdfHistory[]>([]);
 
@@ -264,7 +265,8 @@ export default function ExportPage() {
         fileUrl: urlData.publicUrl,
         template: `${template}-vivliostyle`, // Mark as vivliostyle
         version: selectedVersion || 0,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        status: 'cloud_stored'
       };
 
       const updatedHistory = [newHistory, ...pdfHistory];
@@ -956,7 +958,8 @@ export default function ExportPage() {
               fileUrl: urlData.publicUrl,
               template,
               version: selectedVersion || 0,
-              createdAt: new Date().toISOString()
+              createdAt: new Date().toISOString(),
+              status: 'cloud_stored'
             };
             
             const updatedHistory = [newHistory, ...pdfHistory];
@@ -1156,7 +1159,8 @@ export default function ExportPage() {
               fileUrl: urlData.publicUrl,
               template: `${presetName}-${styleName}`,
               version: selectedVersion || 0,
-              createdAt: new Date().toISOString()
+              createdAt: new Date().toISOString(),
+              status: 'cloud_stored'
             };
             
             const updatedHistory = [newHistory, ...pdfHistory];
@@ -1230,15 +1234,75 @@ export default function ExportPage() {
         };
       });
 
+      // 调试：检查 source_ids
+      bookChapters.forEach((ch, i) => {
+        console.log(`Chapter ${i + 1} source_ids:`, ch.sourceIds);
+      });
+
       // Step 2: 获取关联照片
       setProgress(30);
       setStatusMessage('正在获取关联照片...');
 
       let chapterPhotos = new Map<number, any[]>();
       if (includePhotos) {
+        // 1. 获取自动关联的照片 (DB)
         chapterPhotos = await getAllChapterPhotos(projectId, bookChapters);
+        
+        // 2. 获取手动关联的照片 (LocalStorage)
+        const currentAttachments = attachments.filter(
+          a => selectedVersion !== null && a.outlineVersion === selectedVersion
+        );
+        
+        if (currentAttachments.length > 0) {
+           console.log(`🔍 发现 ${currentAttachments.length} 个手动标注，正在获取详情...`);
+           const photoIds = [...new Set(currentAttachments.map(a => a.photoId))];
+           
+           const { data: manualPhotos } = await supabase
+             .from('photo_memories')
+             .select(`
+               id,
+               photo_url,
+               caption,
+               linked_question_id,
+               photo_people(
+                 people_roster(name)
+               )
+             `)
+             .in('id', photoIds);
+
+           if (manualPhotos) {
+             const photoLookup = new Map(manualPhotos.map(p => [p.id, p]));
+             
+             currentAttachments.forEach(att => {
+               const p = photoLookup.get(att.photoId);
+               if (p) {
+                 const chapterIdx = att.sectionIndex;
+                 const existing = chapterPhotos.get(chapterIdx) || [];
+                 
+                 // Avoid duplicates by URL
+                 if (!existing.some(e => e.url === p.photo_url)) {
+                   // Extract person names
+                   const personNames = p.photo_people
+                    ? (p.photo_people as any[])
+                        .map(pp => pp.people_roster?.name)
+                        .filter(Boolean)
+                    : [];
+
+                   existing.push({
+                     url: p.photo_url,
+                     personNames: personNames,
+                     caption: att.note || p.caption || '', // Use manual note if available
+                     questionId: p.linked_question_id
+                   });
+                   chapterPhotos.set(chapterIdx, existing);
+                 }
+               }
+             });
+           }
+        }
+
         const totalPhotos = Array.from(chapterPhotos.values()).reduce((sum, arr) => sum + arr.length, 0);
-        console.log(`📷 找到 ${totalPhotos} 张关联照片`);
+        console.log(`📷 找到 ${totalPhotos} 张关联照片 (含手动标注)`);
       }
 
       // Step 3: 生成配置
@@ -1285,6 +1349,26 @@ export default function ExportPage() {
 
       // 使用浏览器原生打印功能（支持 CSS Paged Media）
       printToPDF(bookHtml);
+
+      // Save local history even without upload
+      const presetName = printPreset.replace('Standard', '').toUpperCase();
+      const styleName = AUTHOR_STYLES[selectedAuthorStyle]?.nameEn || 'default';
+      const safeTitle = generateSafeFileName(bookTitle);
+      const fileName = `${safeTitle}_${presetName}_${styleName}_v${selectedVersion}.pdf`;
+      
+      const newHistory: PdfHistory = {
+        id: crypto.randomUUID(),
+        fileName,
+        // No fileUrl for local print
+        template: `${presetName}-${styleName}-vivliostyle`,
+        version: selectedVersion || 0,
+        createdAt: new Date().toISOString(),
+        status: 'local_download'
+      };
+
+      const updatedHistory = [newHistory, ...pdfHistory];
+      setPdfHistory(updatedHistory);
+      localStorage.setItem('pdfHistory', JSON.stringify(updatedHistory));
 
       setProgress(100);
       setStatusMessage('✅ 已打开打印预览！');
@@ -1511,31 +1595,57 @@ export default function ExportPage() {
                     </div>
                     <div style={{ color: '#8C8377', marginBottom: 6 }}>
                       {new Date(pdf.createdAt).toLocaleString()}
+                      {pdf.status === 'local_download' && (
+                        <span style={{ 
+                          marginLeft: 6, 
+                          fontSize: 9, 
+                          background: '#eee', 
+                          padding: '2px 4px', 
+                          borderRadius: 3 
+                        }}>
+                          本地
+                        </span>
+                      )}
                     </div>
-                    <a
-                      href={pdf.fileUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
+                    {pdf.fileUrl ? (
+                      <a
+                        href={pdf.fileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: 'inline-block',
+                          padding: '4px 8px',
+                          background: 'rgba(95, 111, 82, 0.1)',
+                          border: '1px solid rgba(95, 111, 82, 0.3)',
+                          borderRadius: 4,
+                          color: '#5F6F52',
+                          fontSize: 10,
+                          textDecoration: 'none',
+                          transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'rgba(95, 111, 82, 0.2)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'rgba(95, 111, 82, 0.1)';
+                        }}
+                      >
+                        下载 PDF ↓
+                      </a>
+                    ) : (
+                      <span style={{
                         display: 'inline-block',
                         padding: '4px 8px',
-                        background: 'rgba(95, 111, 82, 0.1)',
-                        border: '1px solid rgba(95, 111, 82, 0.3)',
+                        background: '#f5f5f5',
+                        border: '1px solid #e0e0e0',
                         borderRadius: 4,
-                        color: '#5F6F52',
+                        color: '#999',
                         fontSize: 10,
-                        textDecoration: 'none',
-                        transition: 'all 0.2s',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = 'rgba(95, 111, 82, 0.2)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = 'rgba(95, 111, 82, 0.1)';
-                      }}
-                    >
-                      下载 PDF ↓
-                    </a>
+                        cursor: 'not-allowed'
+                      }}>
+                        文件在本地 (未上传)
+                      </span>
+                    )}
                   </div>
                 ))}
                 {pdfHistory.length > 5 && (
@@ -1729,7 +1839,7 @@ export default function ExportPage() {
           </div>
 
           {/* Template Selection */}
-          <div style={{ marginBottom: 24 }}>
+          <div style={{ marginBottom: 24, display: 'none' }}>
             <label style={{ display: 'block', fontSize: 14, marginBottom: 8 }}>
               📐 排版模板
             </label>

@@ -39,13 +39,13 @@ export function CompletionMilestones({ answeredCount }: CompletionMilestonesProp
         Milestone Progress
       </h3>
       
-      <div style={{ position: 'relative', height: 80, margin: '0 10px' }}>
+      <div style={{ position: 'relative', height: 80, margin: '0 20px' }}>
         {/* Background Line */}
         <div style={{
           position: 'absolute',
           top: 20,
-          left: 0,
-          right: 0,
+          left: -10,
+          right: -10,
           height: 4,
           background: 'rgba(184,155,114,0.1)',
           borderRadius: 2,
@@ -56,8 +56,9 @@ export function CompletionMilestones({ answeredCount }: CompletionMilestonesProp
         <div style={{
           position: 'absolute',
           top: 20,
-          left: 0,
-          width: `${progressPercent}%`,
+          left: -10,
+          width: `calc(${progressPercent}% + 10px)`,
+          maxWidth: 'calc(100% + 20px)',
           height: 4,
           background: '#B89B72',
           borderRadius: 2,
@@ -68,7 +69,17 @@ export function CompletionMilestones({ answeredCount }: CompletionMilestonesProp
         {/* Milestones */}
         {MILESTONES.map((m) => {
           const unlocked = answeredCount >= m.count
-          const position = m.count // Position based on count (0-100)
+          // Position calculation: 
+          // We want milestones to be slightly shifted left relative to their pure percentage
+          // but still distributed along the line.
+          // Let's use a scale from 0 to 100, but map 10 to ~5% and 100 to ~95%
+          // Formula: (count / 100) * 90 + 5
+          // Or just standard percentage if we want them evenly distributed within the container
+          // To "shift left" as requested, we can adjust the calculation.
+          
+          // Original: const position = m.count
+          // Shifted left slightly: map 10-100 to range 5-95 to leave room on ends
+          const position = ((m.count - 10) / 90) * 90 + 5
           
           return (
             <div

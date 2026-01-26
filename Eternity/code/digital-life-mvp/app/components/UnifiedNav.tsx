@@ -597,6 +597,28 @@ export default function UnifiedNav({ onProClick, onCollabClick }: UnifiedNavProp
                 </button>
               )}
 
+              {/* ELDERLY - Always unlocked */}
+              <Link
+                href="/elderly"
+                style={{
+                  padding: '8px 12px',
+                  height: 34,
+                  boxSizing: 'border-box',
+                  display: 'flex',
+                  alignItems: 'center',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  borderRadius: 4,
+                  textDecoration: 'none',
+                  border: pathname.includes('/elderly') ? '1px solid #8B7355' : '1px solid #E3D6C6',
+                  whiteSpace: 'nowrap',
+                  background: pathname.includes('/elderly') ? '#FAF8F5' : 'white',
+                  color: pathname.includes('/elderly') ? '#8B7355' : '#5A4F43',
+                }}
+              >
+                👴 老人录音
+              </Link>
+
               {/* PRO */}
               <button
                 onClick={() => {

@@ -9,8 +9,8 @@ import UnifiedNav from '../components/UnifiedNav';
 
 type Question = {
   id: string;
-  question_text: string;
-  category?: string;
+  text: string;
+  chapter?: string;
 };
 
 type Place = {
@@ -99,9 +99,9 @@ export default function PhotosPage() {
       // Load questions (排除 trial 问题)
       const { data: questionsData } = await supabase
         .from('questions')
-        .select('id, question_text, category')
+        .select('id, text, chapter')
         .in('scope', ['global', 'user'])
-        .order('category', { ascending: true });
+        .order('chapter', { ascending: true });
       if (questionsData) setQuestions(questionsData);
 
       // Load places
@@ -378,7 +378,7 @@ export default function PhotosPage() {
   const questionsByCategory = useMemo(() => {
     const grouped: Record<string, Question[]> = {};
     questions.forEach(q => {
-      const cat = q.category || '其他';
+      const cat = q.chapter || '其他';
       if (!grouped[cat]) grouped[cat] = [];
       grouped[cat].push(q);
     });
@@ -629,7 +629,7 @@ export default function PhotosPage() {
                   {Object.entries(questionsByCategory).map(([category, qs]) => (
                     <optgroup key={category} label={category}>
                       {qs.map(q => (
-                        <option key={q.id} value={q.id}>{q.question_text}</option>
+                        <option key={q.id} value={q.id}>{q.text}</option>
                       ))}
                     </optgroup>
                   ))}

@@ -9,6 +9,23 @@ import {
   outlineToMarkdown,
   type BiographyOutline,
 } from '../../lib/biographyOutlineApi'
+import {
+  DndContext, 
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 const LOCAL_PHOTOS_KEY = 'photoFlow.photos'
 const LOCAL_OUTLINE_ATTACHMENTS_KEY = 'outlineAttachments'
@@ -36,6 +53,109 @@ type AttachmentNote = {
   addedAt: string
 }
 
+function SortableChapterItem({ 
+  section, 
+  idx, 
+  selectedSection, 
+  attachedCount, 
+  onClick, 
+  onDelete 
+}: {
+  section: any, 
+  idx: number, 
+  selectedSection: number | null, 
+  attachedCount: number,
+  onClick: () => void,
+  onDelete: (e: React.MouseEvent) => void
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id: `section-${idx}` });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    marginBottom: 16
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="transition-colors group relative"
+    >
+      <div
+        style={{
+          padding: 16,
+          paddingLeft: 40, // Space for drag handle
+          borderRadius: 8,
+          border: selectedSection === idx ? '2px solid #2C2C2C' : '1px solid #E5E5E0',
+          cursor: 'pointer',
+          background: selectedSection === idx ? '#FAFAFA' : 'white',
+          position: 'relative'
+        }}
+        onClick={onClick}
+      >
+        {/* Drag Handle */}
+        <div 
+          {...attributes} 
+          {...listeners}
+          style={{
+            position: 'absolute',
+            left: 10,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            cursor: 'grab',
+            padding: 4,
+            opacity: 0.3
+          }}
+          className="hover:opacity-100"
+        >
+          ⋮⋮
+        </div>
+
+        {/* Delete Button */}
+        <button
+          onClick={onDelete}
+          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-red-500 hover:bg-red-50 p-1 rounded"
+          style={{ transition: 'opacity 0.2s' }}
+          title="删除章节"
+        >
+          🗑️
+        </button>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h4 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#2C2C2C' }}>{section.title}</h4>
+          {attachedCount > 0 && (
+            <div className="bg-[#2C2C2C] text-white rounded-full" style={{ padding: '2px 8px', fontSize: 11, marginRight: 20 }}>
+              {attachedCount} 张附件
+            </div>
+          )}
+        </div>
+        <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: '#666666', lineHeight: 1.6 }}>
+          {section.bullets.slice(0, 3).map((bullet: string, bidx: number) => (
+            <li key={bidx} style={{ marginBottom: 4 }}>{bullet}</li>
+          ))}
+          {section.bullets.length > 3 && <li style={{ fontStyle: 'italic', opacity: 0.7 }}>...更多</li>}
+        </ul>
+        {section.quotes && section.quotes.length > 0 && (
+          <div style={{ marginTop: 12, padding: '10px 12px', background: '#F9FAFB', borderLeft: '3px solid #B89B72', borderRadius: '0 4px 4px 0' }}>
+            {section.quotes.map((q: { text: string }, i: number) => (
+              <div key={i} style={{ fontSize: 12, color: '#5A4F43', fontStyle: 'italic', marginBottom: 4 }}>
+                "{q.text}"
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function OutlineAnnotationPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [userEmail, setUserEmail] = useState<string | null>(null)
@@ -50,8 +170,29 @@ export default function OutlineAnnotationPage() {
   const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null)
   const [noteInput, setNoteInput] = useState('')
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  
+  // Local state for reordering
+  const [localSections, setLocalSections] = useState<any[]>([])
+  const [hasChanges, setHasChanges] = useState(false)
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
   const hasHydratedAttachments = useRef(false)
+
+  // Sync local sections when selected outline changes
+  useEffect(() => {
+    if (selected && selected.outline_json?.sections) {
+      setLocalSections(selected.outline_json.sections)
+      setHasChanges(false)
+    } else {
+      setLocalSections([])
+    }
+  }, [selected?.id]) // Only reset when ID changes, not when we update 'selected' locally
 
   function showToast(text: string, type: 'success' | 'error' = 'success') {
     setToast({ text, type })
@@ -110,9 +251,51 @@ export default function OutlineAnnotationPage() {
     }
   }
 
+  async function loadPhotosFromSupabase(uid: string) {
+    try {
+      const { data: serverPhotos, error } = await supabase
+        .from('photo_memories')
+        .select('id, file_name, photo_url, place_id, time_taken, caption, created_at')
+        .eq('user_id', uid)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      if (serverPhotos) {
+        const mappedServerPhotos: PhotoItem[] = serverPhotos.map((p) => ({
+          id: p.id,
+          fileName: p.file_name,
+          previewUrl: p.photo_url,
+          remoteUrl: p.photo_url,
+          people: [],
+          scene: {
+            location: p.place_id,
+            date: p.time_taken,
+            notes: p.caption,
+            tags: [],
+          },
+        }));
+
+        setPhotos((prevLocal) => {
+          const serverIds = new Set(mappedServerPhotos.map(p => p.id));
+          const uniqueLocal = prevLocal.filter(p => !serverIds.has(p.id));
+          return [...mappedServerPhotos, ...uniqueLocal];
+        });
+      }
+    } catch (e) {
+      console.error('Error loading server photos:', e);
+    }
+  }
+
   useEffect(() => {
     initAuthAndProject()
   }, [])
+
+  useEffect(() => {
+    if (userId) {
+      loadPhotosFromSupabase(userId);
+    }
+  }, [userId]);
 
   useEffect(() => {
     if (projectId) {
@@ -187,6 +370,74 @@ export default function OutlineAnnotationPage() {
     showToast('已移除附件')
   }
 
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    
+    if (active.id !== over?.id) {
+      setLocalSections((items) => {
+        const oldIndex = items.findIndex((_, idx) => `section-${idx}` === active.id);
+        const newIndex = items.findIndex((_, idx) => `section-${idx}` === over?.id);
+        
+        return arrayMove(items, oldIndex, newIndex);
+      });
+      setHasChanges(true);
+    }
+  }
+
+  function handleDeleteChapter(index: number) {
+    if (!confirm('确定要删除这个章节吗？')) return;
+    
+    setLocalSections(prev => prev.filter((_, i) => i !== index));
+    setHasChanges(true);
+    if (selectedSection === index) setSelectedSection(null);
+  }
+
+  async function saveOutlineChanges() {
+    if (!selected || !projectId || !selected.outline_json) return;
+    
+    try {
+      // Ensure we preserve all required fields
+      const currentJson = selected.outline_json;
+      const updatedOutlineJson = {
+        ...currentJson,
+        sections: localSections,
+      };
+      
+      // Ensure sections is overridden correctly
+      updatedOutlineJson.sections = localSections;
+
+      const { error } = await supabase
+        .from('biography_outlines')
+        .update({ 
+          outline_json: updatedOutlineJson,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', selected.id);
+
+      if (error) throw error;
+
+      // Update local state
+      const newSelected = {
+        ...selected,
+        outline_json: updatedOutlineJson as any
+      };
+      setSelected(newSelected);
+      
+      // Also update the list
+      setOutlines(prev => prev.map(o => 
+        o.id === selected.id 
+          ? newSelected
+          : o
+      ));
+
+      setHasChanges(false);
+      showToast('大纲修改已保存');
+    } catch (e: any) {
+      console.error('Save failed:', e);
+      showToast('保存失败: ' + e.message, 'error');
+    }
+  }
+
   const sectionAttachments = useMemo(() => {
     if (selectedSection === null || !selected) return []
     return attachments.filter(
@@ -256,38 +507,57 @@ export default function OutlineAnnotationPage() {
             `}</style>
             <div className="annotate-grid">
               <aside className="bg-white rounded-xl shadow-lg border border-gray-200" style={{ padding: 16 }}>
-              <div style={{ fontWeight: 700, marginBottom: 8, color: '#2C2C2C' }}>版本列表</div>
-              {loading ? (
-                <div style={{ fontSize: 12, color: '#666666' }}>加载中...</div>
-              ) : outlines.length === 0 ? (
-                <div style={{ fontSize: 12, color: '#666666' }}>暂无大纲。</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {outlines.map((o) => (
-                    <button
-                      key={o.id}
-                      onClick={() => {
-                        setSelected(o)
-                        setSelectedSection(null)
-                      }}
-                      className="w-full text-left transition-colors"
-                      style={{
-                        padding: '10px 12px',
-                        background: selected?.id === o.id ? '#F5F5F0' : 'white',
-                        border: selected?.id === o.id ? '1px solid #2C2C2C' : '1px solid #E5E5E0',
-                        borderRadius: 8,
-                        fontSize: 12,
-                        color: '#2C2C2C'
-                      }}
-                    >
-                      <div style={{ fontWeight: 700 }}>版本 {o.version}</div>
-                      <div style={{ fontSize: 11, color: '#666666' }}>{new Date(o.created_at).toLocaleString()}</div>
-                      <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: o.status === 'done' ? '#16a34a' : o.status === 'failed' ? '#dc2626' : '#2563eb' }}>
-                        {o.status.toUpperCase()}
-                      </div>
-                    </button>
-                  ))}
-                </div>
+              <div 
+                style={{ 
+                  fontWeight: 700, 
+                  marginBottom: 8, 
+                  color: '#2C2C2C', 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center',
+                  cursor: 'pointer'
+                }}
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              >
+                <span>版本列表</span>
+                <span style={{ fontSize: 12, color: '#666666' }}>{sidebarCollapsed ? '▼' : '▲'}</span>
+              </div>
+              
+              {!sidebarCollapsed && (
+                <>
+                {loading ? (
+                  <div style={{ fontSize: 12, color: '#666666' }}>加载中...</div>
+                ) : outlines.length === 0 ? (
+                  <div style={{ fontSize: 12, color: '#666666' }}>暂无大纲。</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {outlines.map((o) => (
+                      <button
+                        key={o.id}
+                        onClick={() => {
+                          setSelected(o)
+                          setSelectedSection(null)
+                        }}
+                        className="w-full text-left transition-colors"
+                        style={{
+                          padding: '10px 12px',
+                          background: selected?.id === o.id ? '#F5F5F0' : 'white',
+                          border: selected?.id === o.id ? '1px solid #2C2C2C' : '1px solid #E5E5E0',
+                          borderRadius: 8,
+                          fontSize: 12,
+                          color: '#2C2C2C'
+                        }}
+                      >
+                        <div style={{ fontWeight: 700 }}>版本 {o.version}</div>
+                        <div style={{ fontSize: 11, color: '#666666' }}>{new Date(o.created_at).toLocaleString()}</div>
+                        <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: o.status === 'done' ? '#16a34a' : o.status === 'failed' ? '#dc2626' : '#2563eb' }}>
+                          {o.status.toUpperCase()}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                </>
               )}
             </aside>
 
@@ -298,41 +568,48 @@ export default function OutlineAnnotationPage() {
                 <div style={{ fontSize: 12, color: '#666666' }}>大纲未就绪。</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#2C2C2C' }}>{selected.outline_json.title}</h2>
-                  {selected.outline_json.sections.map((section, idx) => {
-                    const attached = attachments.filter(
-                      (a) => a.outlineVersion === selected.version && a.sectionIndex === idx
-                    )
-                    return (
-                      <div
-                        key={idx}
-                        className="transition-colors"
-                        style={{
-                          padding: 16,
-                          borderRadius: 8,
-                          border: selectedSection === idx ? '2px solid #2C2C2C' : '1px solid #E5E5E0',
-                          cursor: 'pointer',
-                          background: selectedSection === idx ? '#FAFAFA' : 'white',
-                        }}
-                        onClick={() => setSelectedSection(idx)}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#2C2C2C' }}>{selected.outline_json.title}</h2>
+                    {hasChanges && (
+                      <button 
+                        onClick={saveOutlineChanges}
+                        className="bg-[#2C2C2C] text-white px-4 py-1.5 rounded-lg text-xs hover:bg-[#404040] transition-colors shadow-sm"
                       >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                          <h4 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#2C2C2C' }}>{section.title}</h4>
-                          {attached.length > 0 && (
-                            <div className="bg-[#2C2C2C] text-white rounded-full" style={{ padding: '2px 8px', fontSize: 11 }}>
-                              {attached.length} 张附件
-                            </div>
-                          )}
-                        </div>
-                        <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: '#666666', lineHeight: 1.6 }}>
-                          {section.bullets.slice(0, 3).map((bullet, bidx) => (
-                            <li key={bidx} style={{ marginBottom: 4 }}>{bullet}</li>
-                          ))}
-                          {section.bullets.length > 3 && <li style={{ fontStyle: 'italic', opacity: 0.7 }}>...更多</li>}
-                        </ul>
-                      </div>
-                    )
-                  })}
+                        保存修改
+                      </button>
+                    )}
+                  </div>
+                  
+                  <DndContext 
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleDragEnd}
+                  >
+                    <SortableContext 
+                      items={localSections.map((_, idx) => `section-${idx}`)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      {localSections.map((section, idx) => {
+                        const attached = attachments.filter(
+                          (a) => a.outlineVersion === selected.version && a.sectionIndex === idx
+                        )
+                        return (
+                          <SortableChapterItem
+                            key={`section-${idx}`} // Note: using index as key is risky if items change a lot, but okay for reordering if stable
+                            idx={idx}
+                            section={section}
+                            selectedSection={selectedSection}
+                            attachedCount={attached.length}
+                            onClick={() => setSelectedSection(idx)}
+                            onDelete={(e) => {
+                              e.stopPropagation();
+                              handleDeleteChapter(idx);
+                            }}
+                          />
+                        )
+                      })}
+                    </SortableContext>
+                  </DndContext>
                 </div>
               )}
             </div>

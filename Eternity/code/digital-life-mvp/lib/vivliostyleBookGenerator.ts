@@ -71,36 +71,61 @@ export async function getChapterPhotos(
   try {
     const questionIds = new Set<string>();
 
+    console.log('[getChapterPhotos] Fetching for sourceIds:', sourceIds, 'OutlineId:', outlineId);
+
     // 1. 从 answer_sessions 获取 question_ids
     if (sourceIds && sourceIds.length > 0) {
-      const { data: sessions } = await supabase
-        .from('answer_sessions')
-        .select('question_id')
-        .in('id', sourceIds);
-      
-      if (sessions) {
-        sessions.forEach(s => {
-          if (s.question_id) questionIds.add(s.question_id);
-        });
+      // Validate UUIDs
+      const validSourceIds = sourceIds.filter(id => 
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+      );
+
+      if (validSourceIds.length > 0) {
+        const { data: sessions, error: sessionError } = await supabase
+          .from('answer_sessions')
+          .select('question_id')
+          .in('id', validSourceIds);
+        
+        if (sessionError) {
+          console.error('[getChapterPhotos] Session query error:', sessionError);
+        }
+
+        if (sessions) {
+          sessions.forEach(s => {
+            if (s.question_id) questionIds.add(String(s.question_id));
+          });
+        }
+      } else {
+        console.warn('[getChapterPhotos] No valid UUIDs in sourceIds:', sourceIds);
       }
     }
 
     // 2. 从 chapter_question_links 获取 question_ids
     if (outlineId && chapterId) {
-      const { data: links } = await supabase
-        .from('chapter_question_links')
-        .select('question_id')
-        .eq('outline_version_id', outlineId)
-        .eq('chapter_id', chapterId);
-      
-      if (links) {
-        links.forEach(l => {
-          if (l.question_id) questionIds.add(l.question_id);
-        });
+      // Validate UUID for outlineId
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(outlineId)) {
+        const { data: links, error: linkError } = await supabase
+          .from('chapter_question_links')
+          .select('question_id')
+          .eq('outline_version_id', outlineId)
+          .eq('chapter_id', chapterId);
+        
+        if (linkError) {
+          console.error('[getChapterPhotos] Link query error:', linkError);
+        }
+
+        if (links) {
+          links.forEach(l => {
+            if (l.question_id) questionIds.add(String(l.question_id));
+          });
+        }
+      } else {
+        console.warn('[getChapterPhotos] Invalid outlineId UUID:', outlineId);
       }
     }
 
     if (questionIds.size === 0) {
+      console.log('[getChapterPhotos] No question IDs found for chapter');
       return [];
     }
 
@@ -937,7 +962,7 @@ function calculatePhotoPositions(
 function generatePhotoHTML(photo: ChapterPhoto): string {
   const caption = photo.personNames.length > 0
     ? photo.personNames.join('、')
-    : '';
+    : (photo.caption || ''); // Fallback to photo.caption if no person names
 
   return `
       <div class="photo-container">
@@ -962,7 +987,7 @@ function generatePhotoGroup(photos: ChapterPhoto[], title: string): string {
   photos.forEach(photo => {
     const caption = photo.personNames.length > 0
       ? photo.personNames.join('、')
-      : '';
+      : (photo.caption || ''); // Fallback to photo.caption if no person names
 
     html += `
           <div class="photo-item">

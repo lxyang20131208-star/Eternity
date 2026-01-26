@@ -158,7 +158,15 @@ function ConfirmDialog({
 }
 
 // AudioPlayer component to handle loading and playing signed URLs
-function AudioPlayer({ audioObjectKey }: { audioObjectKey: string }) {
+function AudioPlayer({
+  audioObjectKey,
+  audioFilePath,
+  recordingMethod
+}: {
+  audioObjectKey?: string | null
+  audioFilePath?: string | null
+  recordingMethod?: string | null
+}) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -166,9 +174,23 @@ function AudioPlayer({ audioObjectKey }: { audioObjectKey: string }) {
     async function loadAudio() {
       try {
         setLoading(true)
+
+        // Determine bucket and path based on recording method
+        let bucket = 'vault'
+        let filePath = audioObjectKey
+
+        if (recordingMethod === 'elder_entry' && audioFilePath) {
+          bucket = 'audio_files'
+          filePath = audioFilePath
+        }
+
+        if (!filePath) {
+          throw new Error('No audio file path available')
+        }
+
         const { data: signed, error } = await supabase.storage
-          .from('vault')
-          .createSignedUrl(audioObjectKey, 3600)
+          .from(bucket)
+          .createSignedUrl(filePath, 3600)
 
         if (error) throw error
         setAudioUrl(signed?.signedUrl ?? null)
@@ -180,7 +202,7 @@ function AudioPlayer({ audioObjectKey }: { audioObjectKey: string }) {
     }
 
     loadAudio()
-  }, [audioObjectKey])
+  }, [audioObjectKey, audioFilePath, recordingMethod])
 
   if (loading) {
     return <div style={{ fontSize: 12, color: '#5A4F43' }}>Loading audio...</div>
@@ -687,7 +709,7 @@ function MainPageContent() {
 
         const { data, error } = await supabase
           .from('answer_sessions')
-          .select('id, created_at, audio_object_key, transcript_text')
+          .select('id, created_at, audio_object_key, audio_file_path, recording_method, transcript_text, duration_seconds')
           .eq('project_id', projectId)
           .eq('question_id', currentQuestionId)
           .order('created_at', { ascending: false })
@@ -2138,7 +2160,11 @@ function MainPageContent() {
                           </div>
 
                           {/* Audio Player */}
-                          <AudioPlayer audioObjectKey={session.audio_object_key} />
+                          <AudioPlayer
+                            audioObjectKey={session.audio_object_key}
+                            audioFilePath={session.audio_file_path}
+                            recordingMethod={session.recording_method}
+                          />
 
                           {/* Transcript with Edit for Latest */}
                           {session.transcript_text && (
@@ -3108,7 +3134,8 @@ function MainPageContent() {
         title="Outline Style Preferences"
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div>
+          {/* Tone - Hidden, default to narrative */}
+          <div style={{ display: 'none' }}>
             <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#5A4F43', marginBottom: 8 }}>
               Tone
             </label>
@@ -3131,12 +3158,13 @@ function MainPageContent() {
             </select>
           </div>
 
+          {/* Detail Level - Visible again */}
           <div>
             <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#5A4F43', marginBottom: 8 }}>
               Detail Level
             </label>
             <select
-              value={stylePrefs.depth || 'detailed'}
+              value={stylePrefs.depth || 'comprehensive'}
               onChange={(e) => setStylePrefs({ ...stylePrefs, depth: e.target.value as any })}
               style={{
                 width: '100%',

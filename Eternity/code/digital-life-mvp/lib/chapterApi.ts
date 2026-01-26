@@ -72,10 +72,15 @@ async function expandChapterBatch(
   }
 
   if (!response.ok) {
-    const errorMsg = result.error || `HTTP ${response.status}`
-    console.error('[expandChapterBatch] API error:', errorMsg)
-    throw new Error(errorMsg)
-  }
+      const errorMsg = result.error || `HTTP ${response.status}`
+      console.error('[expandChapterBatch] API error:', errorMsg)
+      
+      if (response.status === 401) {
+        throw new Error('登录会话已过期，请刷新页面或重新登录后重试')
+      }
+      
+      throw new Error(errorMsg)
+    }
 
   console.log('[expandChapterBatch] Success, chapters:', result.chapters?.length)
   return result.chapters || []

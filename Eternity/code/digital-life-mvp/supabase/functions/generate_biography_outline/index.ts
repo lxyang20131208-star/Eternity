@@ -153,6 +153,7 @@ interface AnswerSession {
   transcript_text: string | null
   created_at: string
   round_number?: number | null
+  photos?: string[]
 }
 
 async function sleep(ms: number) {
@@ -163,7 +164,7 @@ async function sleep(ms: number) {
  * Chunk transcripts into manageable batches for AI processing
  */
 function chunkTranscripts(sessions: AnswerSession[], maxChunkSize = 50): AnswerSession[][] {
-  const chunks: AnswerSession[][] = []
+  const chunks: AnswerSession[][]= []
   for (let i = 0; i < sessions.length; i += maxChunkSize) {
     chunks.push(sessions.slice(i, i + maxChunkSize))
   }
@@ -189,7 +190,12 @@ async function generateOutlineChunk(
       const roundLabel = s.round_number === 2
         ? "[深度补充 - 包含更多感官细节、冲突描写或金句]"
         : ""
-      return `[Session ${chunkIndex * 50 + idx + 1} - Question ID: ${s.question_id}]${roundLabel}\n${s.transcript_text}\n`
+      
+      const photoInfo = s.photos && s.photos.length > 0
+        ? `\n[附件照片: ${s.photos.length} 张 - 描述: ${s.photos.join(', ')}]`
+        : ""
+
+      return `[Session ${chunkIndex * 50 + idx + 1} - Question ID: ${s.question_id}]${roundLabel}${photoInfo}\n${s.transcript_text}\n`
     })
     .join("\n---\n\n")
 
@@ -239,6 +245,10 @@ ${authorStylePrompt}
 
 ${toneInstr} ${depthInstr}
 
+【核心指令：时间线排序】
+- 请务必根据访谈内容中提到的时间、年龄、人生阶段（如童年、求学、工作、退休），将生成的章节按**时间发生的先后顺序**排列。
+- 即使访谈记录的顺序是打乱的，你生成的 JSON 数组中的 sections 也必须是按时间正序排列的。
+
 【写作风格要求】
 
 1. **场景重现**：用感官细节重现关键场景，让读者身临其境。
@@ -266,6 +276,10 @@ ${toneInstr} ${depthInstr}
    - 从困惑迷茫到豁然开朗
    - 让读者看到一个立体、真实、有温度的人
 
+【关于照片】
+- 如果输入中包含 [附件照片: ...] 的信息，请在生成的段落中适当提及这些场景，或者确保该段落的描写与照片内容相符。
+- 不要直接在正文中写“如图所示”，而是通过文字描写将画面感融入叙述。
+
 【输出要求】
 - 每个 bullet 是一段完整的传记段落（3-5句话），文字优美、感情真挚
 - 使用第三人称叙述
@@ -286,6 +300,9 @@ You are writing a warm and moving life biography for an ordinary person.
 Below are ${sessions.length} answer transcripts from a user's life story interview.
 
 ${toneInstr} ${depthInstr}
+
+【Core Instruction: Chronological Ordering】
+- You MUST organize the generated sections in **chronological order** of the events in the user's life (e.g., childhood, education, career, retirement), regardless of the order in which the interview questions were asked.
 
 【Writing Style Requirements】
 
@@ -313,6 +330,10 @@ ${toneInstr} ${depthInstr}
    - From childhood innocence to adult maturity
    - From confusion to enlightenment
    - Let readers see a three-dimensional, real, warm human being
+
+【About Photos】
+- If the input contains [Attached Photos: ...], please appropriately mention these scenes in the generated paragraphs or ensure the description aligns with the photo content.
+- Do not write "as shown in the photo" directly; instead, weave the visual imagery into the narrative.
 
 【Output Requirements】
 - Each bullet is a complete biographical paragraph (3-5 sentences), beautifully written with genuine emotion
@@ -405,7 +426,8 @@ function mergeOutlineChunks(chunkResults: string[]): OutlineJSON {
   return {
     title: "Life Story Outline",
     generatedAt: new Date().toISOString(),
-    totalSessions: allSections.reduce((sum, s) => sum + (s.source_ids?.length || 0), 0),
+    // Calculate unique source IDs (unique sessions used) instead of total references
+    totalSessions: new Set(allSections.flatMap(s => s.source_ids || [])).size,
     sections: allSections,
   }
 }
@@ -519,6 +541,33 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "Not enough completed answers with transcripts" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       )
+    }
+
+    // [New] Fetch photos linked to these questions
+    const questionIds = sessions.map(s => s.question_id).filter(Boolean)
+    const { data: linkedPhotos } = await supabase
+      .from("photo_memories")
+      .select("linked_question_id, caption, file_name, photo_url")
+      .in("linked_question_id", questionIds)
+      .eq("annotation_status", "complete")
+
+    // Map photos to sessions
+    if (linkedPhotos) {
+      const photoMap = new Map<string, string[]>()
+      linkedPhotos.forEach(p => {
+        const qId = String(p.linked_question_id)
+        if (!photoMap.has(qId)) photoMap.set(qId, [])
+        photoMap.get(qId)?.push(p.caption || p.file_name || "Untitled Photo")
+      })
+
+      sessions.forEach(s => {
+        if (s.question_id) {
+          const photos = photoMap.get(String(s.question_id))
+          if (photos) {
+            (s as any).photos = photos
+          }
+        }
+      })
     }
 
     // Chunk and process
