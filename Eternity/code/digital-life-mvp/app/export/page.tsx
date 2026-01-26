@@ -27,7 +27,6 @@ import {
   generateVivliostyleHTML,
   getAllChapterPhotos,
   getChapterPhotos,
-  printToPDF,
   type BookConfig,
   type BookChapter,
   type ChapterPhoto,
@@ -191,9 +190,11 @@ export default function ExportPage() {
 
   // Initialize auth and project
   useEffect(() => {
+    let isMounted = true;
     async function init() {
       try {
         const { data: { user } } = await supabase.auth.getUser();
+        if (!isMounted) return;
         if (!user) return;
 
         const { data: list } = await supabase
@@ -202,6 +203,8 @@ export default function ExportPage() {
           .eq('owner_id', user.id)
           .eq('name', 'My Vault')
           .limit(1);
+        
+        if (!isMounted) return;
 
         const pid = list?.[0]?.id;
         if (pid) {
@@ -213,17 +216,22 @@ export default function ExportPage() {
             .select('question_id')
             .eq('project_id', pid);
 
+          if (!isMounted) return;
+
           if (answers) {
             // Count unique question_ids (main questions only)
             const uniqueQuestions = new Set(answers.map(a => a.question_id));
             setAnsweredCount(uniqueQuestions.size);
           }
         }
-      } catch (err) {
+      } catch (err: any) {
+        // Ignore AbortError which can happen in strict mode or rapid navigation
+        if (err.name === 'AbortError') return;
         console.error('Auth init failed:', err);
       }
     }
     init();
+    return () => { isMounted = false; };
   }, []);
 
   // Listen for Vivliostyle preview close to prompt upload
@@ -290,6 +298,7 @@ export default function ExportPage() {
 
   // Fetch photos from database for preview
   useEffect(() => {
+    let isMounted = true;
     async function fetchPhotos() {
       if (!projectId || !selectedOutline) {
         setChapterPhotosMap(new Map());
@@ -308,28 +317,48 @@ export default function ExportPage() {
 
         if (bookChapters.length > 0) {
           const photoMap = await getAllChapterPhotos(projectId, bookChapters);
-          setChapterPhotosMap(photoMap);
+          if (isMounted) {
+            setChapterPhotosMap(photoMap);
+          }
         }
-      } catch (err) {
-        console.error('Failed to fetch chapter photos:', err);
+      } catch (err: any) {
+        if (isMounted) {
+          if (err.name !== 'AbortError') {
+             console.error('Failed to fetch chapter photos:', err);
+          }
+        }
       } finally {
-        setLoadingPhotos(false);
+        if (isMounted) {
+          setLoadingPhotos(false);
+        }
       }
     }
 
     fetchPhotos();
+    return () => { isMounted = false; };
   }, [projectId, selectedOutline]);
 
   // Load outlines
   useEffect(() => {
+    let isMounted = true;
     if (!projectId) return;
-    listProjectOutlines(projectId).then((data) => {
-      setOutlines(data);
-      if (data.length > 0 && !selectedVersion) {
-        setSelectedVersion(data[0].version);
-        setSelectedOutline(data[0]);
-      }
-    });
+    
+    listProjectOutlines(projectId)
+      .then((data) => {
+        if (!isMounted) return;
+        setOutlines(data);
+        if (data.length > 0 && !selectedVersion) {
+          setSelectedVersion(data[0].version);
+          setSelectedOutline(data[0]);
+        }
+      })
+      .catch(err => {
+        if (isMounted && err.name !== 'AbortError') {
+          console.error('Failed to list outlines:', err);
+        }
+      });
+      
+    return () => { isMounted = false; };
   }, [projectId, selectedVersion]);
   
   // Sync print preset changes
@@ -394,18 +423,28 @@ export default function ExportPage() {
 
   // Load cached expanded chapters when outline changes
   useEffect(() => {
+    let isMounted = true;
     if (!selectedOutline?.id) {
       setExpandedChapters(null);
       return;
     }
-    getExpandedChapters(selectedOutline.id).then((data) => {
-      if (data?.chapters) {
-        setExpandedChapters(data.chapters);
-        setSelectedAuthorStyle(data.author_style || 'default');
-      } else {
-        setExpandedChapters(null);
-      }
-    });
+    getExpandedChapters(selectedOutline.id)
+      .then((data) => {
+        if (!isMounted) return;
+        if (data?.chapters) {
+          setExpandedChapters(data.chapters);
+          setSelectedAuthorStyle(data.author_style || 'default');
+        } else {
+          setExpandedChapters(null);
+        }
+      })
+      .catch(err => {
+         if (isMounted && err.name !== 'AbortError') {
+           console.error('Failed to get expanded chapters:', err);
+         }
+      });
+      
+    return () => { isMounted = false; };
   }, [selectedOutline?.id]);
 
   // Handle chapter expansion
@@ -1240,11 +1279,6 @@ export default function ExportPage() {
         };
       });
 
-      // 调试：检查 source_ids
-      bookChapters.forEach((ch, i) => {
-        console.log(`Chapter ${i + 1} source_ids:`, ch.sourceIds);
-      });
-
       // Step 2: 获取关联照片
       setProgress(30);
       setStatusMessage('正在获取关联照片...');
@@ -1334,68 +1368,114 @@ export default function ExportPage() {
         photoSize: photoSize,
       };
 
-      // Step 4: 生成 HTML
+      // Step 4: 调用云端生成 API
       setProgress(70);
-      setStatusMessage('正在生成书籍 HTML...');
+      setStatusMessage('正在云端生成 PDF (请稍候)...');
 
-      // 调试：输出章节数据
-      console.log('[Vivliostyle] 章节数量:', bookChapters.length);
-      console.log('[Vivliostyle] 第一章标题:', bookChapters[0]?.title);
-      console.log('[Vivliostyle] 第一章内容长度:', bookChapters[0]?.content?.length);
+      // 转换 Map 为 Array 以便传输
+      const chapterPhotosEntries = Array.from(chapterPhotos.entries());
 
-      const bookHtml = generateVivliostyleHTML(bookConfig, bookChapters, chapterPhotos);
+      const response = await fetch('/api/export-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookConfig,
+          chapters: bookChapters,
+          chapterPhotosEntries
+        })
+      });
 
-      // 调试：输出生成的 HTML 信息
-      console.log('[Vivliostyle] HTML 长度:', bookHtml.length);
-      console.log('[Vivliostyle] HTML 开头:', bookHtml.substring(0, 500));
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Server error: ${response.statusText}`);
+      }
 
-      // Step 5: 打开打印预览
+      const pdfBlob = await response.blob();
+
+      // Step 5: 保存和下载
       setProgress(90);
-      setStatusMessage('正在打开打印预览...');
+      setStatusMessage('正在保存文件...');
 
-      // 使用浏览器原生打印功能（支持 CSS Paged Media）
-      printToPDF(bookHtml);
-
-      // Save local history even without upload
       const presetName = printPreset.replace('Standard', '').toUpperCase();
       const styleName = AUTHOR_STYLES[selectedAuthorStyle]?.nameEn || 'default';
       const safeTitle = generateSafeFileName(bookTitle);
       const fileName = `${safeTitle}_${presetName}_${styleName}_v${selectedVersion}.pdf`;
-      
-      const newHistory: PdfHistory = {
-        id: crypto.randomUUID(),
-        fileName,
-        // No fileUrl for local print
-        template: `${presetName}-${styleName}-vivliostyle`,
-        version: selectedVersion || 0,
-        createdAt: new Date().toISOString(),
-        status: 'local_download'
-      };
 
-      const updatedHistory = [newHistory, ...pdfHistory];
-      setPdfHistory(updatedHistory);
-      localStorage.setItem('pdfHistory', JSON.stringify(updatedHistory));
+      // Try to upload to Supabase Storage
+      let uploadSuccess = false;
+      let publicUrl = '';
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session && projectId) {
+          const timestamp = Date.now();
+          const safeStorageName = generateStorageSafePath(`${safeTitle}_${presetName}_${styleName}_v${selectedVersion}`);
+          const storagePath = `pdfs/${projectId}/${timestamp}_${safeStorageName}.pdf`;
+          
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('biography-exports')
+            .upload(storagePath, pdfBlob, {
+              contentType: 'application/pdf',
+              upsert: false
+            });
+          
+          if (uploadError) {
+            console.error('❌ PDF上传失败:', uploadError);
+          } else if (uploadData) {
+            const { data: urlData } = supabase.storage
+              .from('biography-exports')
+              .getPublicUrl(storagePath);
+            
+            publicUrl = urlData.publicUrl;
+            console.log('✅ PDF上传成功，URL:', publicUrl);
+            
+            // Save to history
+            const newHistory: PdfHistory = {
+              id: crypto.randomUUID(),
+              fileName,
+              fileUrl: publicUrl,
+              template: `${presetName}-${styleName}-vivliostyle`,
+              version: selectedVersion || 0,
+              createdAt: new Date().toISOString(),
+              status: 'cloud_stored'
+            };
+            
+            const updatedHistory = [newHistory, ...pdfHistory];
+            setPdfHistory(updatedHistory);
+            localStorage.setItem('pdfHistory', JSON.stringify(updatedHistory));
+            uploadSuccess = true;
+          }
+        }
+      } catch (err) {
+        console.error('❌ PDF上传异常:', err);
+      }
+
+      // Trigger local download
+      const url = window.URL.createObjectURL(pdfBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
 
       setProgress(100);
-      setStatusMessage('✅ 已打开打印预览！');
+      setStatusMessage('✅ PDF生成成功！');
 
       setTimeout(() => {
         setExporting(false);
         setProgress(0);
         setStatusMessage('');
-        alert(
-          '📖 Vivliostyle 排版预览已打开！\n\n' +
-          '请在打印对话框中：\n' +
-          '1. 选择"另存为 PDF"作为目标打印机\n' +
-          '2. 确保边距设置为"无"或"最小"\n' +
-          '3. 点击"保存"导出 PDF\n\n' +
-          '提示：此方式使用 CSS Paged Media 规范，确保段落不被截断。'
-        );
-      }, 500);
+        const message = uploadSuccess 
+          ? `✅ 导出成功！\n\nPDF文件：${fileName}\n已自动下载，并保存到云端历史记录。`
+          : `✅ PDF已下载！\n\n文件：${fileName}\n已保存到下载文件夹。\n\n⚠️ 云端保存失败，历史记录仅保存在本地。`;
+        alert(message);
+      }, 1000);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Vivliostyle export failed:', error);
-      alert('导出失败: ' + (error as Error).message);
+      alert('导出失败: ' + (error.message || '未知错误'));
       setExporting(false);
       setProgress(0);
       setStatusMessage('');

@@ -3,7 +3,7 @@
  * 使用 CSS Paged Media 规范，支持智能分页和图片排版
  */
 
-import { supabase as defaultSupabase } from './supabaseClient';
+import { supabase } from './supabaseClient';
 import { SupabaseClient } from '@supabase/supabase-js';
 
 // ============ 类型定义 ============
@@ -43,7 +43,7 @@ export interface BookConfig {
 }
 
 // 页面尺寸配置 (mm)
-const PAGE_SIZES: Record<string, { width: number; height: number }> = {
+export const PAGE_SIZES: Record<string, { width: number; height: number }> = {
   'A4': { width: 210, height: 297 },
   'A5': { width: 148, height: 210 },
   'B5': { width: 176, height: 250 },
@@ -70,7 +70,7 @@ export async function getChapterPhotos(
   chapterId?: string,
   supabaseClient?: SupabaseClient
 ): Promise<ChapterPhoto[]> {
-  const supabase = supabaseClient || defaultSupabase;
+  const client = supabaseClient || supabase;
   try {
     const questionIds = new Set<string>();
 
@@ -84,7 +84,7 @@ export async function getChapterPhotos(
       );
 
       if (validSourceIds.length > 0) {
-        const { data: sessions, error: sessionError } = await supabase
+        const { data: sessions, error: sessionError } = await client
           .from('answer_sessions')
           .select('question_id')
           .in('id', validSourceIds);
@@ -94,7 +94,7 @@ export async function getChapterPhotos(
         }
 
         if (sessions) {
-          sessions.forEach(s => {
+          sessions.forEach((s: any) => {
             if (s.question_id) questionIds.add(String(s.question_id));
           });
         }
@@ -107,7 +107,7 @@ export async function getChapterPhotos(
     if (outlineId && chapterId) {
       // Validate UUID for outlineId
       if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(outlineId)) {
-        const { data: links, error: linkError } = await supabase
+        const { data: links, error: linkError } = await client
           .from('chapter_question_links')
           .select('question_id')
           .eq('outline_version_id', outlineId)
@@ -118,7 +118,7 @@ export async function getChapterPhotos(
         }
 
         if (links) {
-          links.forEach(l => {
+          links.forEach((l: any) => {
             if (l.question_id) questionIds.add(String(l.question_id));
           });
         }
@@ -135,7 +135,7 @@ export async function getChapterPhotos(
     const questionIdList = Array.from(questionIds);
 
     // 3. 根据 question_ids 获取照片 (使用新的 photo_memories 系统)
-    const { data: photos, error: photoError } = await supabase
+    const { data: photos, error: photoError } = await client
       .from('photo_memories')
       .select(`
         photo_url,
@@ -159,11 +159,11 @@ export async function getChapterPhotos(
       return [];
     }
 
-    return photos.map(p => {
+    return photos.map((p: any) => {
       // 提取人物姓名
       const personNames = p.photo_people
         ? (p.photo_people as any[])
-            .map(pp => pp.people_roster?.name)
+            .map((pp: any) => pp.people_roster?.name)
             .filter(Boolean)
         : [];
 
@@ -213,16 +213,20 @@ export async function getAllChapterPhotos(
 export function generateVivliostyleHTML(
   config: BookConfig,
   chapters: BookChapter[],
-  chapterPhotos: Map<number, ChapterPhoto[]>,
-  mode: 'client' | 'server' = 'client'
+  chapterPhotos: Map<number, ChapterPhoto[]>
 ): string {
   const pageSize = PAGE_SIZES[config.pageSize];
   const photoSizeConfig = PHOTO_SIZES[config.photoSize];
 
   const css = generateVivliostyleCSS(config, pageSize);
 
-  // Client-side specific scripts and styles
-  const clientScripts = mode === 'client' ? `
+  let html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>${escapeHtml(config.title)}</title>
+  <style>
+${css}
     /* Loading Overlay 样式 */
     #loading-overlay {
       position: fixed;
@@ -306,9 +310,7 @@ export function generateVivliostyleHTML(
       #loading-overlay { display: none !important; }
       #status-bar { display: none !important; }
     }
-  ` : '';
-
-  const clientJS = mode === 'client' ? `
+  </style>
   <script>
     // 定义全局变量
     let overlay, progressFill, loadingText, printBtn;
@@ -444,9 +446,9 @@ export function generateVivliostyleHTML(
         }, 500);
       }
     }
-  </script>` : '';
-
-  const overlayHTML = mode === 'client' ? `
+  </script>
+</head>
+<body>
   <div id="loading-overlay">
     <div class="loading-content">
       <div class="spinner-large"></div>
@@ -462,21 +464,7 @@ export function generateVivliostyleHTML(
     <button id="manual-print-btn">立即打印 (Ctrl+P)</button>
     <button onclick="window.closePreview()" style="margin-left:10px; background:#e74c3c; border:none; color:white; padding:4px 12px; border-radius:4px; cursor:pointer;">关闭预览</button>
   </div>
-  ` : '';
 
-  let html = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <title>${escapeHtml(config.title)}</title>
-  <style>
-${css}
-${clientScripts}
-  </style>
-${clientJS}
-</head>
-<body>
-${overlayHTML}
   <div class="book-content">
 `;
 
@@ -523,8 +511,15 @@ function generateVivliostyleCSS(
     /* ========== CSS Paged Media 规范 ========== */
     @page {
       size: ${pageSize.width}mm ${pageSize.height}mm;
-      /* 移除 @page 边距，改用 body padding 模拟 */
-      margin: 0; 
+      margin-top: ${margins.top}mm;
+      margin-right: ${margins.outer}mm;
+      margin-bottom: ${margins.bottom}mm;
+      margin-left: ${margins.inner}mm;
+    }
+
+    /* 封面页可能需要独立设置，这里先保持默认页边距或者设为0由内部控制 */
+    @page cover {
+      margin: 0;
     }
 
     /* ========== 基础样式 ========== */
@@ -545,8 +540,8 @@ function generateVivliostyleCSS(
       color: #1a1a1a;
       text-align: justify;
       background: white;
-      /* 使用 padding 模拟页边距，这是最稳妥的兼容方案 */
-      padding: ${margins.top}mm ${margins.outer}mm ${margins.bottom}mm ${margins.inner}mm;
+      /* Screen preview: keep using padding to simulate margins */
+      padding: 0;
       width: ${pageSize.width}mm;
       min-height: ${pageSize.height}mm;
       margin: 0 auto;
@@ -554,6 +549,10 @@ function generateVivliostyleCSS(
 
     /* ========== 屏幕预览样式 ========== */
     @media screen {
+      body {
+        background: #f0f0f0; /* distinct background */
+        padding: 20px; /* viewport padding */
+      }
       .book-content {
         width: ${pageSize.width}mm;
         max-width: none;
@@ -588,7 +587,8 @@ function generateVivliostyleCSS(
     /* ========== 封面 ========== */
     .cover-page {
       page: cover;
-      min-height: ${pageSize.height - margins.top - margins.bottom}mm;
+      /* 如果 margin 为 0，高度即为页面高度 */
+      min-height: ${pageSize.height}mm;
       display: flex;
       flex-direction: column;
       justify-content: center;
@@ -781,9 +781,16 @@ function generateVivliostyleCSS(
 
     /* ========== 打印优化 ========== */
     @media print {
-      /* 强制设置页面尺寸，边距设为0 */
+      /* 强制设置页面尺寸，使用 @page 边距 */
       @page {
         size: ${pageSize.width}mm ${pageSize.height}mm;
+        margin-top: ${margins.top}mm !important;
+        margin-right: ${margins.outer}mm !important;
+        margin-bottom: ${margins.bottom}mm !important;
+        margin-left: ${margins.inner}mm !important;
+      }
+      
+      @page cover {
         margin: 0 !important;
       }
 
@@ -793,8 +800,7 @@ function generateVivliostyleCSS(
         overflow: visible !important;
         background: white !important;
         margin: 0 !important;
-        /* 关键：打印时使用 padding 作为边距 */
-        padding: ${margins.top}mm ${margins.outer}mm ${margins.bottom}mm ${margins.inner}mm !important;
+        padding: 0 !important;
       }
 
       /* 强制内容容器尺寸 */
@@ -808,7 +814,6 @@ function generateVivliostyleCSS(
       }
 
       /* 如果浏览器忽略 @page margin，我们可以尝试用 padding 模拟，但通常 @page 更准确 */
-      /* 备选方案：如果用户反馈边距还是不对，可以尝试将 padding 移到 body 上，但这会影响分页 */
       
       .page-break {
         display: none;
@@ -825,6 +830,7 @@ function generateVivliostyleCSS(
 
       .cover-page {
         height: 100vh;
+        min-height: ${pageSize.height}mm;
       }
 
       /* 确保段落不被截断 */

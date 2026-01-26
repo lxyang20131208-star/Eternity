@@ -143,7 +143,7 @@ export default function UnifiedNav({ onProClick, onCollabClick }: UnifiedNavProp
         gap: 12,
         minHeight: 'auto'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <Link href="/main" style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, textDecoration: 'none', cursor: 'pointer' }}>
           <img 
             src="/logo.png" 
             alt="EverArchive Logo" 
@@ -162,7 +162,7 @@ export default function UnifiedNav({ onProClick, onCollabClick }: UnifiedNavProp
               <span style={{ color: '#5A4F43' }}>Where Memories Outlast Time</span>
             </p>
           </div>
-        </div>
+        </Link>
         {loading ? (
           // Skeleton Loader
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

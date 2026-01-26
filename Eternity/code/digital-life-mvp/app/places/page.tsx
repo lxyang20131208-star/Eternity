@@ -325,10 +325,6 @@ export default function PlacesPage() {
             </div>
           </div>
           
-          {/* Search Bar - Global Search (Nominatim) */}
-          <div className="max-w-xl mt-6">
-             <PlaceSearch onSelect={handleSearchSelect} />
-          </div>
         </div>
 
         {/* Map View */}
@@ -342,6 +338,10 @@ export default function PlacesPage() {
                   onPlaceClick={handlePlaceClick}
                   selectedPlaceId={selectedPlace?.id}
                 />
+              </div>
+              {/* Search Bar - Global Search (Nominatim) */}
+              <div className="mt-4">
+                 <PlaceSearch onSelect={handleSearchSelect} />
               </div>
               {placesWithCoords.length === 0 && places.length > 0 && (
                 <div className="mt-4 bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg text-sm">

@@ -22,18 +22,18 @@ async function fixBucket() {
   
   const bucketName = 'biography-exports';
 
-  // Update bucket to allow image/png
+  // Update bucket to allow image/png and pdf
   const { data, error } = await supabase.storage.updateBucket(bucketName, {
     public: true,
-    allowedMimeTypes: ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'],
-    fileSizeLimit: 10485760 // 10MB
+    allowedMimeTypes: ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf'],
+    fileSizeLimit: 52428800 // 50MB
   });
 
   if (error) {
     console.error('Failed to update bucket:', error);
   } else {
     console.log('✅ Bucket updated successfully!');
-    console.log('Allowed MIME types:', data.allowed_mime_types);
+    console.log('Update result:', data);
   }
 }
 
