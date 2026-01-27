@@ -509,6 +509,50 @@ export default function UnifiedNav({ onProClick, onCollabClick }: UnifiedNavProp
                 </button>
               )}
 
+              {/* CHRONICLE (Timeline2) */}
+              {isFeatureUnlocked('timeline', answeredCount) ? (
+                <Link
+                  href="/timeline2"
+                  style={{
+                    padding: '8px 12px',
+                    height: 34,
+                    boxSizing: 'border-box',
+                    display: 'flex',
+                    alignItems: 'center',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    borderRadius: 4,
+                    textDecoration: 'none',
+                    border: pathname === '/timeline2' ? '1px solid #8B7355' : '1px solid #E3D6C6',
+                    whiteSpace: 'nowrap',
+                    background: pathname === '/timeline2' ? '#FAF8F5' : 'white',
+                    color: pathname === '/timeline2' ? '#8B7355' : '#5A4F43',
+                  }}
+                >
+                  ◇ CHRONICLE
+                </Link>
+              ) : (
+                <button
+                  onClick={() => showLockedFeature('Chronicle', UNLOCK_THRESHOLDS.timeline)}
+                  style={{
+                    padding: '8px 12px',
+                    height: 34,
+                    boxSizing: 'border-box',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    borderRadius: 4,
+                    background: 'white',
+                    color: '#999',
+                    border: '1px solid #E3D6C6',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    opacity: 0.6,
+                  }}
+                >
+                  ◇ CHRONICLE 🔒
+                </button>
+              )}
+
               {/* EXPORT */}
               {isFeatureUnlocked('export', answeredCount) ? (
                 <Link

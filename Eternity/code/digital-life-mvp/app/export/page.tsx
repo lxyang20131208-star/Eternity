@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabaseClient';
 import UnifiedNav from '../components/UnifiedNav';
 import { listProjectOutlines, BiographyOutline, updateOutlineContent } from '@/lib/biographyOutlineApi';
@@ -32,6 +33,21 @@ import {
   type ChapterPhoto,
 } from '@/lib/vivliostyleBookGenerator';
 import BookCoverGenerator from '@/app/components/BookCoverGenerator';
+import { getPlaces } from '@/lib/knowledgeGraphApi';
+import type { Place } from '@/lib/types/knowledge-graph';
+
+// Dynamic import for map component (SSR disabled)
+const PlacesMap = dynamic(() => import('@/components/PlacesMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-[300px] rounded-xl bg-gray-100 flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600 mx-auto mb-2"></div>
+        <p className="text-xs text-gray-500">加载地图...</p>
+      </div>
+    </div>
+  ),
+});
 
 // Helper: Convert rich content to HTML string
 function renderRichToHtml(content: RichTextContent | undefined, fallbackText: string): string {
@@ -187,6 +203,15 @@ export default function ExportPage() {
 
   // State: Book Cover Generator Modal
   const [showCoverGenerator, setShowCoverGenerator] = useState(false);
+
+  // State: Map Screenshot
+  const [showMapModal, setShowMapModal] = useState(false);
+  const [mapPlaces, setMapPlaces] = useState<Place[]>([]);
+  const [loadingMapPlaces, setLoadingMapPlaces] = useState(false);
+  const [mapScreenshot, setMapScreenshot] = useState<string | null>(null);
+  const [capturingMap, setCapturingMap] = useState(false);
+  const [includeMapInBook, setIncludeMapInBook] = useState(false);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
 
   // Initialize auth and project
   useEffect(() => {
@@ -365,6 +390,61 @@ export default function ExportPage() {
   useEffect(() => {
     setPrintConfig(PRINT_PRESETS[printPreset]);
   }, [printPreset]);
+
+  // Load map places when modal is opened
+  useEffect(() => {
+    if (!showMapModal || !projectId) return;
+    
+    let isMounted = true;
+    setLoadingMapPlaces(true);
+    
+    getPlaces(projectId, { hasEvents: true })
+      .then((places) => {
+        if (isMounted) {
+          setMapPlaces(places);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load places for map:', err);
+      })
+      .finally(() => {
+        if (isMounted) {
+          setLoadingMapPlaces(false);
+        }
+      });
+    
+    return () => { isMounted = false; };
+  }, [showMapModal, projectId]);
+
+  // Capture map screenshot
+  const captureMapScreenshot = async () => {
+    if (!mapContainerRef.current) return;
+    
+    setCapturingMap(true);
+    try {
+      // Wait a bit for the map to stabilize
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      const canvas = await html2canvas(mapContainerRef.current, {
+        useCORS: true,
+        allowTaint: true,
+        scale: 2, // Higher quality
+        backgroundColor: '#ffffff',
+        logging: false,
+      });
+      
+      const dataUrl = canvas.toDataURL('image/png');
+      setMapScreenshot(dataUrl);
+      setIncludeMapInBook(true);
+      
+      alert('✅ 地图截图已保存！将在导出时自动添加到书籍中。');
+    } catch (error) {
+      console.error('Failed to capture map:', error);
+      alert('截图失败，请重试');
+    } finally {
+      setCapturingMap(false);
+    }
+  };
 
   // Load photos
   useEffect(() => {
@@ -2229,6 +2309,103 @@ export default function ExportPage() {
             </div>
           )}
 
+          {/* Map Screenshot Section */}
+          {exportFormat === 'pdf' && expandedChapters && (
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', fontSize: 14, marginBottom: 8 }}>
+                🗺️ 地图页面
+              </label>
+              <div style={{
+                padding: 12,
+                background: 'var(--card)',
+                border: '1px solid var(--border)',
+                borderRadius: 6,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                  <input
+                    type="checkbox"
+                    id="includeMapInBook"
+                    checked={includeMapInBook}
+                    onChange={(e) => setIncludeMapInBook(e.target.checked)}
+                    disabled={!mapScreenshot}
+                    style={{ marginRight: 8 }}
+                  />
+                  <label htmlFor="includeMapInBook" style={{ fontSize: 12 }}>
+                    在书中添加地图页面
+                  </label>
+                </div>
+                
+                {mapScreenshot ? (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ 
+                      position: 'relative',
+                      width: '100%',
+                      borderRadius: 6,
+                      overflow: 'hidden',
+                      border: '1px solid var(--border)',
+                    }}>
+                      <img 
+                        src={mapScreenshot} 
+                        alt="地图预览" 
+                        style={{ 
+                          width: '100%', 
+                          height: 'auto',
+                          display: 'block',
+                        }} 
+                      />
+                      <button
+                        onClick={() => {
+                          setMapScreenshot(null);
+                          setIncludeMapInBook(false);
+                        }}
+                        style={{
+                          position: 'absolute',
+                          top: 8,
+                          right: 8,
+                          padding: '4px 8px',
+                          background: 'rgba(220, 38, 38, 0.9)',
+                          border: 'none',
+                          borderRadius: 4,
+                          color: 'white',
+                          fontSize: 11,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                    从地图页面截取足迹地图，添加到书籍中
+                  </div>
+                )}
+                
+                <button
+                  onClick={() => setShowMapModal(true)}
+                  style={{
+                    marginTop: 8,
+                    width: '100%',
+                    padding: '10px 12px',
+                    background: mapScreenshot 
+                      ? 'rgba(95, 111, 82, 0.15)' 
+                      : 'linear-gradient(135deg, #5F6F52 0%, #7A8B6D 100%)',
+                    border: mapScreenshot 
+                      ? '1px solid rgba(95, 111, 82, 0.4)' 
+                      : 'none',
+                    borderRadius: 6,
+                    color: mapScreenshot ? '#5F6F52' : 'white',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    fontWeight: 500,
+                  }}
+                >
+                  {mapScreenshot ? '🔄 重新截取地图' : '📸 截取足迹地图'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Book Title Input */}
           <div style={{ marginBottom: 24 }}>
             <label style={{ display: 'block', fontSize: 14, marginBottom: 8 }}>
@@ -3335,6 +3512,205 @@ export default function ExportPage() {
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Map Screenshot Modal */}
+      {showMapModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.85)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1001,
+          }}
+          onClick={() => setShowMapModal(false)}
+        >
+          <div
+            style={{
+              background: 'linear-gradient(135deg, #F7F5F2 0%, #FFFCF8 100%)',
+              borderRadius: 16,
+              padding: 24,
+              width: '90%',
+              maxWidth: 900,
+              maxHeight: '85vh',
+              overflow: 'auto',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              marginBottom: 20,
+            }}>
+              <div>
+                <h2 style={{ 
+                  margin: 0, 
+                  fontSize: 22, 
+                  color: '#2C2C2C',
+                  fontWeight: 700,
+                }}>
+                  🗺️ 截取足迹地图
+                </h2>
+                <p style={{ 
+                  margin: '6px 0 0', 
+                  fontSize: 13, 
+                  color: '#666' 
+                }}>
+                  选择合适的视图，截取地图添加到书籍中
+                </p>
+              </div>
+              <button
+                onClick={() => setShowMapModal(false)}
+                style={{
+                  padding: '8px 16px',
+                  background: 'rgba(0, 0, 0, 0.05)',
+                  border: '1px solid rgba(0, 0, 0, 0.1)',
+                  borderRadius: 8,
+                  color: '#666',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                }}
+              >
+                关闭
+              </button>
+            </div>
+
+            {loadingMapPlaces ? (
+              <div style={{
+                height: 400,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{
+                    width: 40,
+                    height: 40,
+                    border: '3px solid #E8E4DE',
+                    borderTopColor: '#5F6F52',
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite',
+                    margin: '0 auto 12px',
+                  }} />
+                  <p style={{ color: '#666', fontSize: 14 }}>加载地点数据...</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div 
+                  ref={mapContainerRef}
+                  style={{
+                    width: '100%',
+                    height: 450,
+                    borderRadius: 12,
+                    overflow: 'hidden',
+                    border: '1px solid #E8E4DE',
+                    background: '#fff',
+                  }}
+                >
+                  <PlacesMap
+                    places={mapPlaces}
+                    onPlaceClick={() => {}}
+                  />
+                </div>
+
+                <div style={{ 
+                  marginTop: 16,
+                  padding: 16,
+                  background: 'rgba(95, 111, 82, 0.08)',
+                  borderRadius: 10,
+                  border: '1px solid rgba(95, 111, 82, 0.15)',
+                }}>
+                  <div style={{ 
+                    fontSize: 12, 
+                    color: '#5F6F52', 
+                    marginBottom: 8,
+                    fontWeight: 500,
+                  }}>
+                    💡 使用提示
+                  </div>
+                  <ul style={{ 
+                    margin: 0, 
+                    paddingLeft: 18, 
+                    fontSize: 12, 
+                    color: '#666',
+                    lineHeight: 1.8,
+                  }}>
+                    <li>使用右上角按钮切换不同视图（美国、世界、中国）</li>
+                    <li>调整到满意的视图后，点击下方按钮截取</li>
+                    <li>截取的地图将作为书籍中的一页</li>
+                  </ul>
+                </div>
+
+                <div style={{ 
+                  marginTop: 16, 
+                  display: 'flex', 
+                  gap: 12,
+                  justifyContent: 'flex-end',
+                }}>
+                  <Link
+                    href="/places"
+                    target="_blank"
+                    style={{
+                      padding: '12px 20px',
+                      background: 'transparent',
+                      border: '1px solid #E8E4DE',
+                      borderRadius: 10,
+                      color: '#666',
+                      fontSize: 14,
+                      textDecoration: 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    ↗ 在新窗口编辑地点
+                  </Link>
+                  <button
+                    onClick={captureMapScreenshot}
+                    disabled={capturingMap}
+                    style={{
+                      padding: '12px 28px',
+                      background: capturingMap 
+                        ? '#ccc' 
+                        : 'linear-gradient(135deg, #5F6F52 0%, #7A8B6D 100%)',
+                      border: 'none',
+                      borderRadius: 10,
+                      color: 'white',
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: capturingMap ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      boxShadow: capturingMap ? 'none' : '0 4px 12px rgba(95, 111, 82, 0.3)',
+                    }}
+                  >
+                    {capturingMap ? (
+                      <>
+                        <span style={{ 
+                          display: 'inline-block',
+                          animation: 'spin 1s linear infinite',
+                        }}>⏳</span>
+                        截取中...
+                      </>
+                    ) : (
+                      <>📸 截取当前视图</>
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

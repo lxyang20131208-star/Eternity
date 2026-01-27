@@ -1,8 +1,32 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import L from 'leaflet';
 import type { Place } from '@/lib/types/knowledge-graph';
+
+// 预设视图配置
+const MAP_VIEWS = {
+  usa: {
+    center: [39.8283, -98.5795] as [number, number],
+    zoom: 4,
+    label: '🇺🇸 美国',
+  },
+  world: {
+    center: [20, 0] as [number, number],
+    zoom: 2,
+    label: '🌍 世界',
+  },
+  china: {
+    center: [35.8617, 104.1954] as [number, number],
+    zoom: 4,
+    label: '🇨🇳 中国',
+  },
+};
+
+export interface PlacesMapRef {
+  getMapElement: () => HTMLDivElement | null;
+  getCurrentView: () => string;
+}
 
 interface PlacesMapProps {
   places: Place[];
@@ -10,12 +34,53 @@ interface PlacesMapProps {
   selectedPlaceId?: string;
 }
 
-export default function PlacesMap({ places, onPlaceClick, selectedPlaceId }: PlacesMapProps) {
+const PlacesMap = forwardRef<PlacesMapRef, PlacesMapProps>(({ places, onPlaceClick, selectedPlaceId }, ref) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
   const [isMapReady, setIsMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [currentView, setCurrentView] = useState<'usa' | 'world' | 'china' | 'auto'>('auto');
+
+  // 暴露方法给父组件
+  useImperativeHandle(ref, () => ({
+    getMapElement: () => mapRef.current,
+    getCurrentView: () => currentView,
+  }));
+
+  // 切换到预设视图
+  const switchToView = (viewKey: 'usa' | 'world' | 'china') => {
+    if (!mapInstanceRef.current) return;
+    
+    const view = MAP_VIEWS[viewKey];
+    mapInstanceRef.current.setView(view.center, view.zoom, {
+      animate: true,
+      duration: 0.8,
+    });
+    setCurrentView(viewKey);
+  };
+
+  // 自动适应所有地点
+  const fitToPlaces = () => {
+    if (!mapInstanceRef.current) return;
+    
+    const placesWithCoords = places.filter(p => p.lat && p.lng);
+    if (placesWithCoords.length === 0) {
+      // 默认显示中国
+      switchToView('china');
+      return;
+    }
+
+    const bounds = L.latLngBounds([]);
+    placesWithCoords.forEach(place => {
+      if (place.lat && place.lng) {
+        bounds.extend([place.lat, place.lng]);
+      }
+    });
+
+    mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+    setCurrentView('auto');
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined' || !mapRef.current) return;
@@ -164,6 +229,65 @@ export default function PlacesMap({ places, onPlaceClick, selectedPlaceId }: Pla
 
   return (
     <div className="relative w-full h-full min-h-[400px] rounded-xl overflow-hidden border border-gray-200">
+      {/* 视图切换按钮 */}
+      {isMapReady && (
+        <div className="absolute top-3 right-3 z-[1000] flex flex-col gap-2">
+          <div className="bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden">
+            <button
+              onClick={() => switchToView('usa')}
+              className={`px-3 py-2 text-sm font-medium transition-colors flex items-center gap-1.5 w-full ${
+                currentView === 'usa'
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="缩放到美国"
+            >
+              🇺🇸 美国
+            </button>
+            <div className="border-t border-gray-100" />
+            <button
+              onClick={() => switchToView('world')}
+              className={`px-3 py-2 text-sm font-medium transition-colors flex items-center gap-1.5 w-full ${
+                currentView === 'world'
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="世界地图"
+            >
+              🌍 世界
+            </button>
+            <div className="border-t border-gray-100" />
+            <button
+              onClick={() => switchToView('china')}
+              className={`px-3 py-2 text-sm font-medium transition-colors flex items-center gap-1.5 w-full ${
+                currentView === 'china'
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="缩放到中国"
+            >
+              🇨🇳 中国
+            </button>
+            {places.filter(p => p.lat && p.lng).length > 0 && (
+              <>
+                <div className="border-t border-gray-100" />
+                <button
+                  onClick={fitToPlaces}
+                  className={`px-3 py-2 text-sm font-medium transition-colors flex items-center gap-1.5 w-full ${
+                    currentView === 'auto'
+                      ? 'bg-green-50 text-green-700'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                  title="适应所有地点"
+                >
+                  📍 适应
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      
       <div ref={mapRef} className="w-full h-full" />
       {!isMapReady && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
@@ -193,4 +317,8 @@ export default function PlacesMap({ places, onPlaceClick, selectedPlaceId }: Pla
       `}</style>
     </div>
   );
-}
+});
+
+PlacesMap.displayName = 'PlacesMap';
+
+export default PlacesMap;

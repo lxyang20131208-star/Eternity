@@ -56,6 +56,26 @@ export async function POST(request: NextRequest) {
 
     console.log(`[Detect Duplicates] Found ${people.length} people`);
 
+    // 打印所有人物的名字和别名，便于调试
+    console.log('[Detect Duplicates] All people names:', people.map(p => ({
+      id: p.id,
+      name: p.name,
+      aliases: p.aliases || [],
+      extraction_status: p.extraction_status
+    })));
+
+    // 特别检查是否有名为"刘雪丽"的人物
+    const liuXueliPeople = people.filter(p => p.name.includes('刘雪丽') || p.name.includes('刘雪') || p.name.includes('雪丽'));
+    if (liuXueliPeople.length > 0) {
+      console.log(`[Detect Duplicates] Found ${liuXueliPeople.length} people with name containing "刘雪丽/刘雪/雪丽":`, liuXueliPeople.map(p => ({
+        id: p.id,
+        name: p.name,
+        nameBytes: [...p.name].map(c => c.charCodeAt(0)),
+        aliases: p.aliases,
+        extraction_status: p.extraction_status
+      })));
+    }
+
     // 2. 检测相似人物对（阈值0.7）
     const similarPairs = detectSimilarPairs(people as Person[], 0.7);
 

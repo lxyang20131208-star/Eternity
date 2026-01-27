@@ -90,12 +90,28 @@ export async function PATCH(request: NextRequest) {
     }
 
     // 更新人物信息
-    const { data: updatedPerson, error: updateError } = await supabaseAdmin
+    let { data: updatedPerson, error: updateError } = await supabaseAdmin
       .from('people')
       .update(updates)
       .eq('id', personId)
       .select()
       .single()
+
+    // 如果更新失败且包含 node_color，尝试移除 node_color 后重试
+    // 这通常发生在数据库迁移尚未应用的情况下
+    if (updateError && updates.node_color && updateError.message.includes('node_color')) {
+      console.warn('[API Update Person] Update failed due to node_color, retrying without it. Please apply migration 20260127130000_add_node_color_to_people.sql')
+      const { node_color, ...safeUpdates } = updates
+      const retryResult = await supabaseAdmin
+        .from('people')
+        .update(safeUpdates)
+        .eq('id', personId)
+        .select()
+        .single()
+      
+      updatedPerson = retryResult.data
+      updateError = retryResult.error
+    }
 
     if (updateError) {
       console.error('[API Update Person] Error:', updateError)

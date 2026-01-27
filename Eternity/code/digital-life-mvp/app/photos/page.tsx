@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import type { Photo, PhotoFilters, UnsortedStats } from '@/lib/types/photos';
@@ -19,6 +19,13 @@ type Place = {
   description?: string;
 };
 
+type Person = {
+  id: string;
+  name: string;
+  relation?: string;
+  avatar_url?: string;
+};
+
 type PhotoDetail = {
   id: string;
   url: string;
@@ -28,7 +35,6 @@ type PhotoDetail = {
   time_taken: string | null;
   caption: string | null;
   annotation_status: string | null;
-  // For people, we'll need to load separately
   people_ids: string[];
 };
 
@@ -40,21 +46,66 @@ export default function PhotosPage() {
   const [viewMode, setViewMode] = useState<'all' | 'unsorted'>('all');
   const [projectId, setProjectId] = useState('');
 
+  // Upload modal state
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+
   // Detail panel state
   const [selectedPhoto, setSelectedPhoto] = useState<PhotoDetail | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [places, setPlaces] = useState<Place[]>([]);
+  const [peopleRoster, setPeopleRoster] = useState<Person[]>([]);
   const [saving, setSaving] = useState(false);
   const [creatingPlace, setCreatingPlace] = useState(false);
   const [newPlaceName, setNewPlaceName] = useState('');
+  const [creatingPerson, setCreatingPerson] = useState(false);
+  const [newPersonName, setNewPersonName] = useState('');
+  const [newPersonRelation, setNewPersonRelation] = useState('');
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // AI Analysis state
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState<{
+    description?: string;
+    people_count?: number;
+    people_description?: string;
+    location_type?: string;
+    location_guess?: string;
+    time_period?: string;
+    occasion?: string;
+    emotions?: string | string[];
+    keywords?: string[];
+  } | null>(null);
+  const [aiMatchedQuestions, setAiMatchedQuestions] = useState<Array<{
+    id: string;
+    question_text: string;
+    category?: string;
+  }>>([]);
+  const [aiSuggestedCaption, setAiSuggestedCaption] = useState<string>('');
 
   // Load photos on mount and when viewMode changes
   useEffect(() => {
     loadPhotos();
     loadStats();
     loadQuestionsAndPlaces();
+    loadPeopleRoster();
   }, [viewMode]);
+
+  // Paste-to-upload handler
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      if (!showUploadModal) return;
+      if (!e.clipboardData) return;
+      const files = Array.from(e.clipboardData.files || []).filter(f => f.type.startsWith('image/'));
+      if (files.length) {
+        handleUploadFiles(files);
+      }
+    }
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [showUploadModal]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -116,6 +167,117 @@ export default function PhotosPage() {
       if (placesData) setPlaces(placesData);
     } catch (e) {
       console.warn('Failed to load questions/places', e);
+    }
+  };
+
+  const loadPeopleRoster = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const { data: roster } = await supabase
+        .from('people_roster')
+        .select('id, name, relation, avatar_url')
+        .eq('user_id', session.user.id)
+        .order('name', { ascending: true });
+
+      if (roster) setPeopleRoster(roster);
+    } catch (e) {
+      console.warn('Failed to load people roster', e);
+    }
+  };
+
+  // Upload via presigned URL
+  const uploadViaPresignedUrl = async (file: File): Promise<string> => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('请先登录');
+    }
+
+    const urlResponse = await fetch('/api/photos/upload-url', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      body: JSON.stringify({
+        filename: file.name,
+        contentType: file.type
+      })
+    });
+
+    if (!urlResponse.ok) {
+      throw new Error('获取上传链接失败');
+    }
+
+    const { uploadUrl, fileUrl } = await urlResponse.json();
+
+    await fetch(uploadUrl, {
+      method: 'PUT',
+      body: file,
+      headers: {
+        'Content-Type': file.type,
+        'x-upsert': 'false'
+      }
+    });
+
+    return fileUrl;
+  };
+
+  // Handle file upload
+  const handleUploadFiles = async (fileList: FileList | File[]) => {
+    const files = Array.from(fileList).filter(f => f.type.startsWith('image/')).slice(0, 10);
+    if (!files.length) return;
+
+    setUploading(true);
+    setUploadProgress({ current: 0, total: files.length });
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        showToast('请先登录', 'error');
+        return;
+      }
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setUploadProgress({ current: i + 1, total: files.length });
+
+        try {
+          // Upload to storage
+          const remoteUrl = await uploadViaPresignedUrl(file);
+          const photoId = crypto.randomUUID();
+
+          // Save to database with annotation_status = 'incomplete'
+          const { error: saveError } = await supabase
+            .from('photo_memories')
+            .insert({
+              id: photoId,
+              user_id: session.user.id,
+              file_name: file.name,
+              photo_url: remoteUrl,
+              annotation_status: 'incomplete'
+            });
+
+          if (saveError) {
+            console.error('Failed to save photo:', saveError);
+            showToast(`保存 ${file.name} 失败`, 'error');
+          }
+        } catch (err) {
+          console.error('Upload error for', file.name, err);
+          showToast(`上传 ${file.name} 失败`, 'error');
+        }
+      }
+
+      showToast(`成功上传 ${files.length} 张照片`, 'success');
+      setShowUploadModal(false);
+      await loadPhotos();
+      await loadStats();
+    } catch (e: any) {
+      showToast(e?.message || '上传失败', 'error');
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -320,6 +482,57 @@ export default function PhotosPage() {
     }
   };
 
+  const createPerson = async () => {
+    if (!newPersonName.trim()) return;
+    setCreatingPerson(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        showToast('请先登录', 'error');
+        return;
+      }
+
+      const personId = crypto.randomUUID();
+      const { data: newPerson, error } = await supabase
+        .from('people_roster')
+        .insert({
+          id: personId,
+          user_id: session.user.id,
+          name: newPersonName.trim(),
+          relation: newPersonRelation.trim() || null
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (newPerson) {
+        setPeopleRoster((prev) => [...prev, newPerson]);
+        // Also add to current photo
+        if (selectedPhoto) {
+          updatePhotoField('people_ids', [...selectedPhoto.people_ids, newPerson.id]);
+        }
+        setNewPersonName('');
+        setNewPersonRelation('');
+        showToast('人物已创建', 'success');
+      }
+    } catch (e: any) {
+      showToast(e?.message || '创建人物失败', 'error');
+    } finally {
+      setCreatingPerson(false);
+    }
+  };
+
+  const togglePersonInPhoto = (personId: string) => {
+    if (!selectedPhoto) return;
+    const isSelected = selectedPhoto.people_ids.includes(personId);
+    if (isSelected) {
+      updatePhotoField('people_ids', selectedPhoto.people_ids.filter(id => id !== personId));
+    } else {
+      updatePhotoField('people_ids', [...selectedPhoto.people_ids, personId]);
+    }
+  };
+
   const savePhotoChanges = async () => {
     if (!selectedPhoto) return;
     setSaving(true);
@@ -358,6 +571,31 @@ export default function PhotosPage() {
         return;
       }
 
+      // Update photo_people associations
+      // First delete existing associations
+      await supabase
+        .from('photo_people')
+        .delete()
+        .eq('photo_id', selectedPhoto.id);
+
+      // Then insert new associations
+      if (selectedPhoto.people_ids.length > 0) {
+        const peopleInserts = selectedPhoto.people_ids.map(personId => ({
+          photo_id: selectedPhoto.id,
+          person_id: personId,
+          is_unknown: false
+        }));
+
+        const { error: peopleError } = await supabase
+          .from('photo_people')
+          .insert(peopleInserts);
+
+        if (peopleError) {
+          console.error('Failed to save photo people:', peopleError);
+          // Don't fail the whole save, just log it
+        }
+      }
+
       showToast('保存成功', 'success');
 
       // Reload photos to reflect changes
@@ -373,6 +611,96 @@ export default function PhotosPage() {
       setSaving(false);
     }
   };
+
+  // AI Analysis function
+  const analyzePhoto = async () => {
+    if (!selectedPhoto) return;
+    
+    setIsAnalyzing(true);
+    setAiAnalysis(null);
+    setAiMatchedQuestions([]);
+    setAiSuggestedCaption('');
+
+    try {
+      // 获取用户 token
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        showToast('请先登录', 'error');
+        setIsAnalyzing(false);
+        return;
+      }
+
+      // 使用 FormData 发送请求
+      const formData = new FormData();
+      formData.append('imageUrl', selectedPhoto.url);
+
+      const response = await fetch('/api/photos/analyze', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || '分析失败');
+      }
+
+      const result = await response.json();
+      
+      if (result.analysis) {
+        setAiAnalysis(result.analysis);
+        
+        // 自动填充照片描述
+        if (result.suggestedCaption && !selectedPhoto.caption) {
+          updatePhotoField('caption', result.suggestedCaption);
+        }
+        
+        // 自动匹配或创建地点
+        if (result.analysis.location_guess && !selectedPhoto.place_id) {
+          const locationGuess = result.analysis.location_guess;
+          // 尝试找到匹配的地点
+          const matchedPlace = places.find(p => 
+            p.name.toLowerCase().includes(locationGuess.toLowerCase()) ||
+            locationGuess.toLowerCase().includes(p.name.toLowerCase())
+          );
+          if (matchedPlace) {
+            updatePhotoField('place_id', matchedPlace.id);
+          } else {
+            // 自动创建新地点
+            setNewPlaceName(locationGuess);
+          }
+        }
+      }
+      
+      if (result.matchedQuestions && result.matchedQuestions.length > 0) {
+        setAiMatchedQuestions(result.matchedQuestions);
+        // 自动选择第一个推荐的问题
+        if (!selectedPhoto.linked_question_id) {
+          updatePhotoField('linked_question_id', result.matchedQuestions[0].id);
+        }
+      }
+      
+      if (result.suggestedCaption) {
+        setAiSuggestedCaption(result.suggestedCaption);
+      }
+
+      showToast('AI 分析完成，已自动填充标签', 'success');
+    } catch (error) {
+      console.error('AI analysis error:', error);
+      showToast('AI 分析失败，请重试', 'error');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Reset AI state when photo changes
+  useEffect(() => {
+    setAiAnalysis(null);
+    setAiMatchedQuestions([]);
+    setAiSuggestedCaption('');
+  }, [selectedPhoto?.id]);
 
   // Group questions by category
   const questionsByCategory = useMemo(() => {
@@ -428,6 +756,9 @@ export default function PhotosPage() {
               <p className="text-[#666666] mt-1">
                 {photos.length > 0 ? `${photos.length} 张照片` : '记录美好瞬间'}
               </p>
+              <p className="text-[#8B7355] text-sm mt-2 leading-relaxed max-w-xl">
+                💡 上传家人的老照片，让AI帮你分析照片中的人物、地点和故事，自动关联到传记章节中
+              </p>
             </div>
 
             <div className="flex items-center gap-3">
@@ -462,7 +793,7 @@ export default function PhotosPage() {
 
               {/* Upload button */}
               <button
-                onClick={() => router.push('/photos/new')}
+                onClick={() => setShowUploadModal(true)}
                 className="group px-5 py-2.5 bg-[#2C2C2C] hover:bg-[#404040] text-white rounded-xl transition-all duration-200 font-medium flex items-center gap-2 shadow-sm"
               >
                 <svg className="w-5 h-5 transition-transform group-hover:rotate-90 duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -546,7 +877,7 @@ export default function PhotosPage() {
             </p>
             {viewMode === 'all' && (
               <button
-                onClick={() => router.push('/photos/new')}
+                onClick={() => setShowUploadModal(true)}
                 className="group px-8 py-3.5 bg-[#2C2C2C] hover:bg-[#404040] text-white rounded-xl transition-all duration-200 font-medium inline-flex items-center gap-2 shadow-sm"
               >
                 <svg className="w-5 h-5 transition-transform group-hover:rotate-90 duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -588,7 +919,7 @@ export default function PhotosPage() {
             <div className="relative bg-gray-900">
               <img
                 src={selectedPhoto.url}
-                alt={selectedPhoto.file_name}
+                alt={selectedPhoto.caption || selectedPhoto.file_name}
                 className="w-full max-h-[50vh] object-contain"
               />
               {/* Completion badge */}
@@ -603,7 +934,7 @@ export default function PhotosPage() {
 
             {/* Form */}
             <div className="p-6 space-y-6">
-              <h2 className="text-xl font-bold text-gray-900">{selectedPhoto.file_name}</h2>
+              <h2 className="text-xl font-bold text-gray-900">{selectedPhoto.caption || '未命名照片'}</h2>
 
               {/* 1. Question Link */}
               <div>
@@ -618,6 +949,116 @@ export default function PhotosPage() {
                     </span>
                   )}
                 </label>
+
+                {/* AI Analysis Button */}
+                <button
+                  onClick={analyzePhoto}
+                  disabled={isAnalyzing}
+                  className="w-full mb-3 px-4 py-3 rounded-xl bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {isAnalyzing ? (
+                    <>
+                      <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      AI 分析中...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                      </svg>
+                      AI 智能分析
+                    </>
+                  )}
+                </button>
+
+                {/* AI Analysis Results */}
+                {aiAnalysis && (
+                  <div className="mb-3 p-3 rounded-xl bg-purple-50 border border-purple-200">
+                    <h4 className="text-sm font-medium text-purple-800 mb-2 flex items-center gap-1">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      AI 分析结果
+                    </h4>
+                    <div className="space-y-1 text-xs text-purple-700">
+                      {aiAnalysis.people_description && (
+                        <p><span className="font-medium">人物:</span> {aiAnalysis.people_description}</p>
+                      )}
+                      {aiAnalysis.location_guess && (
+                        <p><span className="font-medium">地点:</span> {aiAnalysis.location_guess}</p>
+                      )}
+                      {aiAnalysis.time_period && (
+                        <p><span className="font-medium">时期:</span> {aiAnalysis.time_period}</p>
+                      )}
+                      {aiAnalysis.occasion && (
+                        <p><span className="font-medium">场合:</span> {aiAnalysis.occasion}</p>
+                      )}
+                      {aiAnalysis.emotions && (
+                        <p><span className="font-medium">情感:</span> {Array.isArray(aiAnalysis.emotions) ? aiAnalysis.emotions.join(', ') : aiAnalysis.emotions}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* AI Recommended Questions */}
+                {aiMatchedQuestions.length > 0 && (
+                  <div className="mb-3 p-3 rounded-xl bg-indigo-50 border border-indigo-200">
+                    <h4 className="text-sm font-medium text-indigo-800 mb-2 flex items-center gap-1">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                      </svg>
+                      AI 推荐问题（点击选择）
+                    </h4>
+                    <div className="space-y-2">
+                      {aiMatchedQuestions.slice(0, 5).map((mq, idx) => (
+                        <button
+                          key={mq.id}
+                          onClick={() => updatePhotoField('linked_question_id', mq.id)}
+                          className={`w-full text-left p-2 rounded-lg text-xs transition-all ${
+                            selectedPhoto.linked_question_id === mq.id
+                              ? 'bg-indigo-200 border-indigo-400'
+                              : 'bg-white hover:bg-indigo-100 border-indigo-100'
+                          } border`}
+                        >
+                          <div className="flex items-start gap-2">
+                            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-500 text-white text-xs flex items-center justify-center">
+                              {idx + 1}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-indigo-900 truncate">{mq.question_text}</p>
+                              {mq.category && (
+                                <p className="text-indigo-600 mt-0.5">{mq.category}</p>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* AI Suggested Caption */}
+                {aiSuggestedCaption && (
+                  <div className="mb-3 p-3 rounded-xl bg-green-50 border border-green-200">
+                    <h4 className="text-sm font-medium text-green-800 mb-2 flex items-center gap-1">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                      AI 建议描述
+                    </h4>
+                    <p className="text-xs text-green-700 mb-2">{aiSuggestedCaption}</p>
+                    <button
+                      onClick={() => updatePhotoField('caption', aiSuggestedCaption)}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-green-500 text-white hover:bg-green-600 transition-colors"
+                    >
+                      使用此描述
+                    </button>
+                  </div>
+                )}
+
                 <select
                   value={selectedPhoto.linked_question_id || ''}
                   onChange={(e) => updatePhotoField('linked_question_id', e.target.value || null)}
@@ -636,7 +1077,7 @@ export default function PhotosPage() {
                 </select>
               </div>
 
-              {/* 2. People (simplified - show as info, editing requires separate flow) */}
+              {/* 2. People - interactive chips */}
               <div>
                 <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
                   标记人物
@@ -649,12 +1090,82 @@ export default function PhotosPage() {
                     </span>
                   )}
                 </label>
-                <div className={`w-full px-4 py-3 rounded-xl border ${
+
+                {/* Selected people */}
+                {selectedPhoto.people_ids.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {selectedPhoto.people_ids.map(personId => {
+                      const person = peopleRoster.find(p => p.id === personId);
+                      return (
+                        <button
+                          key={personId}
+                          onClick={() => togglePersonInPhoto(personId)}
+                          className="px-3 py-1.5 rounded-full text-sm bg-gradient-to-r from-[#f5d9b8] to-[#efe6dd] text-[#2C2C2C] border border-[#d4c4a8] flex items-center gap-1.5 hover:opacity-80 transition-opacity"
+                        >
+                          {person?.name || '未知'}
+                          {person?.relation && <span className="text-xs opacity-70">({person.relation})</span>}
+                          <svg className="w-3.5 h-3.5 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Available people to add */}
+                <div className={`rounded-xl border ${
                   missingFields.includes('people') ? 'border-red-300 bg-red-50' : 'border-gray-200 bg-gray-50'
-                } text-gray-600 text-sm`}>
-                  {selectedPhoto.people_ids.length > 0
-                    ? `已标记 ${selectedPhoto.people_ids.length} 人`
-                    : '暂无标记人物（请在上传页面标记）'}
+                } p-3`}>
+                  <div className="text-xs text-gray-500 mb-2">点击添加人物</div>
+                  <div className="flex flex-wrap gap-2">
+                    {peopleRoster
+                      .filter(p => !selectedPhoto.people_ids.includes(p.id))
+                      .map(person => (
+                        <button
+                          key={person.id}
+                          onClick={() => togglePersonInPhoto(person.id)}
+                          className="px-3 py-1.5 rounded-full text-sm bg-white border border-gray-200 text-gray-700 hover:border-[#d4c4a8] hover:bg-[#faf8f5] transition-all"
+                        >
+                          {person.name}
+                          {person.relation && <span className="text-xs opacity-60 ml-1">({person.relation})</span>}
+                        </button>
+                      ))}
+                    {peopleRoster.filter(p => !selectedPhoto.people_ids.includes(p.id)).length === 0 && selectedPhoto.people_ids.length > 0 && (
+                      <span className="text-xs text-gray-400">所有人物已添加</span>
+                    )}
+                    {peopleRoster.length === 0 && (
+                      <span className="text-xs text-gray-400">暂无人物，请先创建</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Quick add new person */}
+                <div className="mt-3 p-3 bg-gray-50 rounded-xl border border-gray-200">
+                  <div className="text-xs text-gray-500 mb-2">快速创建新人物</div>
+                  <div className="flex gap-2 flex-wrap">
+                    <input
+                      type="text"
+                      value={newPersonName}
+                      onChange={(e) => setNewPersonName(e.target.value)}
+                      placeholder="姓名"
+                      className="flex-1 min-w-[120px] px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                    <input
+                      type="text"
+                      value={newPersonRelation}
+                      onChange={(e) => setNewPersonRelation(e.target.value)}
+                      placeholder="关系（可选）"
+                      className="flex-1 min-w-[100px] px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                    <button
+                      onClick={createPerson}
+                      disabled={creatingPerson || !newPersonName.trim()}
+                      className="px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                    >
+                      {creatingPerson ? '...' : '添加'}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -770,6 +1281,94 @@ export default function PhotosPage() {
         </div>
       )}
 
+      {/* Upload Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => !uploading && setShowUploadModal(false)}
+          />
+
+          {/* Modal */}
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 animate-fade-in">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-900">上传照片</h3>
+              <button
+                onClick={() => !uploading && setShowUploadModal(false)}
+                disabled={uploading}
+                className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center transition-colors disabled:opacity-50"
+              >
+                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6">
+              {uploading ? (
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-r from-[#f5d9b8] to-[#efe6dd] flex items-center justify-center">
+                    <svg className="w-8 h-8 text-[#8B7355] animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  </div>
+                  <p className="text-gray-900 font-medium">
+                    正在上传 {uploadProgress?.current}/{uploadProgress?.total}...
+                  </p>
+                  <p className="text-gray-500 text-sm mt-1">请稍候，不要关闭窗口</p>
+                </div>
+              ) : (
+                <div
+                  className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-[#d4c4a8] hover:bg-[#faf8f5] transition-all"
+                  onClick={() => uploadInputRef.current?.click()}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.classList.add('border-[#d4c4a8]', 'bg-[#faf8f5]');
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.classList.remove('border-[#d4c4a8]', 'bg-[#faf8f5]');
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.classList.remove('border-[#d4c4a8]', 'bg-[#faf8f5]');
+                    handleUploadFiles(e.dataTransfer.files);
+                  }}
+                >
+                  <input
+                    ref={uploadInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => e.target.files && handleUploadFiles(e.target.files)}
+                  />
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-r from-[#f5d9b8] to-[#efe6dd] flex items-center justify-center">
+                    <svg className="w-8 h-8 text-[#8B7355]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <p className="text-gray-900 font-medium mb-1">拖拽照片到这里，或点击选择</p>
+                  <p className="text-gray-500 text-sm">支持 JPG、PNG 等格式，最多 10 张</p>
+                  <p className="text-gray-400 text-xs mt-2">也可以直接粘贴 (Ctrl+V / Cmd+V)</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer hint */}
+            <div className="px-6 py-4 bg-gray-50 rounded-b-2xl border-t border-gray-100">
+              <p className="text-xs text-gray-500 text-center">
+                上传后照片将显示为「待整理」状态，点击照片可完成标注
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Animation styles */}
       <style jsx global>{`
         @keyframes slide-in-right {
@@ -784,6 +1383,19 @@ export default function PhotosPage() {
         }
         .animate-slide-in-right {
           animation: slide-in-right 0.3s ease-out;
+        }
+        @keyframes fade-in {
+          from {
+            opacity: 0;
+            transform: scale(0.95);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+        .animate-fade-in {
+          animation: fade-in 0.2s ease-out;
         }
       `}</style>
     </div>

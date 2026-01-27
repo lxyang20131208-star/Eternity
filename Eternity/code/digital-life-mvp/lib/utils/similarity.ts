@@ -21,12 +21,25 @@ export interface SimilarityResult {
  */
 export function calculateSimilarity(personA: Person, personB: Person): SimilarityResult {
   // 构建完整的别名集合（包括主名字）
-  const aliasesA = [personA.name, ...(personA.aliases || [])].map(a => a.toLowerCase().trim());
-  const aliasesB = [personB.name, ...(personB.aliases || [])].map(a => a.toLowerCase().trim());
+  // 注意：对名字进行规范化处理，去除空格、全角字符等
+  const normalizeString = (s: string): string => {
+    return s
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, '') // 去除所有空白字符
+      .replace(/[\u3000\uFEFF]/g, ''); // 去除全角空格和BOM字符
+  };
+
+  const aliasesA = [personA.name, ...(personA.aliases || [])].map(normalizeString);
+  const aliasesB = [personB.name, ...(personB.aliases || [])].map(normalizeString);
 
   // 第一层：别名精确匹配（最高优先级）
+  // 注意：直接比较姓名是否相同（完全相同的名字应该被检测为重复）
   const hasExactMatch = aliasesA.some(a => aliasesB.includes(a));
   if (hasExactMatch) {
+    console.log(`[Similarity] ✓ Exact match found: "${personA.name}" and "${personB.name}"`);
+    console.log(`[Similarity]   aliasesA (normalized): ${JSON.stringify(aliasesA)}`);
+    console.log(`[Similarity]   aliasesB (normalized): ${JSON.stringify(aliasesB)}`);
     return { score: 0.95, reason: 'exact_alias' };
   }
 
@@ -43,13 +56,13 @@ export function calculateSimilarity(personA: Person, personB: Person): Similarit
   }
 
   // 第三层：姓名编辑距离（拼写相似，处理输入错误）
-  const nameSimilarity = levenshteinSimilarity(
-    personA.name.toLowerCase(),
-    personB.name.toLowerCase()
-  );
+  const normalizedNameA = normalizeString(personA.name);
+  const normalizedNameB = normalizeString(personB.name);
+  const nameSimilarity = levenshteinSimilarity(normalizedNameA, normalizedNameB);
 
   if (nameSimilarity > 0.8) {
     // 编辑距离相似度乘以0.85作为最终分数
+    console.log(`[Similarity] Name similar: "${personA.name}" vs "${personB.name}" (normalized: "${normalizedNameA}" vs "${normalizedNameB}"), similarity=${nameSimilarity}`);
     return { score: nameSimilarity * 0.85, reason: 'name_similar' };
   }
 
@@ -221,21 +234,30 @@ export function detectSimilarPairs(
     reason: string;
   }> = [];
 
+  console.log(`[detectSimilarPairs] Starting with ${people.length} people, threshold=${threshold}`);
+
   // 两两比对（时间复杂度 O(n²)，适用于中小规模数据）
   for (let i = 0; i < people.length; i++) {
     for (let j = i + 1; j < people.length; j++) {
       const personA = people[i];
       const personB = people[j];
 
-      // 跳过已被合并的人物
-      if (personA.metadata?.extraction_status === 'merged' ||
-          personB.metadata?.extraction_status === 'merged') {
+      // 跳过已被合并的人物（extraction_status 在顶层，不在 metadata 内）
+      if (personA.extraction_status === 'merged' ||
+          personB.extraction_status === 'merged') {
+        console.log(`[detectSimilarPairs] Skipping merged: "${personA.name}" (${personA.extraction_status}) or "${personB.name}" (${personB.extraction_status})`);
         continue;
       }
 
       const result = calculateSimilarity(personA, personB);
 
+      // 打印所有比较结果（用于调试）
+      if (result.score > 0 || personA.name === personB.name) {
+        console.log(`[detectSimilarPairs] Comparing "${personA.name}" vs "${personB.name}": score=${result.score}, reason=${result.reason}`);
+      }
+
       if (result.score >= threshold) {
+        console.log(`[detectSimilarPairs] ✓ Found duplicate pair: "${personA.name}" and "${personB.name}" (score=${result.score})`);
         pairs.push({
           personAId: personA.id,
           personBId: personB.id,
@@ -245,6 +267,8 @@ export function detectSimilarPairs(
       }
     }
   }
+
+  console.log(`[detectSimilarPairs] Found ${pairs.length} pairs total`);
 
   // 按相似度降序排序
   pairs.sort((a, b) => b.similarity - a.similarity);

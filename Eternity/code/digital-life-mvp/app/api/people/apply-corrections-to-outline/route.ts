@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // 2. 获取最新的传记大纲
+    // 2. 获取所有的传记大纲（不只是最新版本，而是所有已完成的版本）
     const { data: outlines, error: outlineError } = await supabaseAdmin
       .from('biography_outlines')
       .select('id, outline_json, version')
@@ -47,10 +47,9 @@ export async function POST(request: NextRequest) {
       .eq('status', 'done')
       .not('outline_json', 'is', null)
       .order('version', { ascending: false })
-      .limit(1)
 
     if (outlineError) {
-      console.error('[Apply Corrections] Error fetching outline:', outlineError)
+      console.error('[Apply Corrections] Error fetching outlines:', outlineError)
       return NextResponse.json({ error: outlineError.message }, { status: 500 })
     }
 
@@ -62,58 +61,75 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const outline = outlines[0]
-    const outlineJson = outline.outline_json
+    console.log(`[Apply Corrections] Found ${outlines.length} outlines to process`)
 
-    // 3. 应用所有修正到大纲内容
+    // 3. 应用所有修正到所有大纲内容
     let totalReplacements = 0
-    const appliedCorrections: Array<{ oldName: string; newName: string; count: number }> = []
+    let outlinesUpdated = 0
+    const correctionCounts: Map<string, { oldName: string; newName: string; count: number }> = new Map()
 
-    // 将大纲 JSON 转为字符串以便做全局替换
-    let outlineString = JSON.stringify(outlineJson)
+    // 遍历所有大纲
+    for (const outline of outlines) {
+      let outlineString = JSON.stringify(outline.outline_json)
+      let outlineReplacements = 0
 
-    for (const correction of corrections) {
-      const oldName = correction.old_name
-      const newName = correction.new_name
+      for (const correction of corrections) {
+        const oldName = correction.old_name
+        const newName = correction.new_name
 
-      // 计算替换次数
-      const regex = new RegExp(escapeRegExp(oldName), 'g')
-      const matches = outlineString.match(regex)
-      const count = matches ? matches.length : 0
+        // 计算替换次数
+        const regex = new RegExp(escapeRegExp(oldName), 'g')
+        const matches = outlineString.match(regex)
+        const count = matches ? matches.length : 0
 
-      if (count > 0) {
-        outlineString = outlineString.replace(regex, newName)
-        totalReplacements += count
-        appliedCorrections.push({ oldName, newName, count })
+        if (count > 0) {
+          outlineString = outlineString.replace(regex, newName)
+          outlineReplacements += count
+          totalReplacements += count
+
+          // 累加统计
+          const key = `${oldName}→${newName}`
+          if (correctionCounts.has(key)) {
+            correctionCounts.get(key)!.count += count
+          } else {
+            correctionCounts.set(key, { oldName, newName, count })
+          }
+        }
+      }
+
+      // 如果这个大纲有替换，更新它
+      if (outlineReplacements > 0) {
+        const updatedOutlineJson = JSON.parse(outlineString)
+
+        const { error: updateError } = await supabaseAdmin
+          .from('biography_outlines')
+          .update({
+            outline_json: updatedOutlineJson,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', outline.id)
+
+        if (updateError) {
+          console.error(`[Apply Corrections] Error updating outline ${outline.id}:`, updateError)
+          // 继续处理其他大纲，不中断
+        } else {
+          outlinesUpdated++
+          console.log(`[Apply Corrections] Applied ${outlineReplacements} replacements to outline ${outline.id} (version ${outline.version})`)
+        }
       }
     }
 
-    // 4. 如果有替换，更新大纲
-    if (totalReplacements > 0) {
-      const updatedOutlineJson = JSON.parse(outlineString)
-
-      const { error: updateError } = await supabaseAdmin
-        .from('biography_outlines')
-        .update({
-          outline_json: updatedOutlineJson,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', outline.id)
-
-      if (updateError) {
-        console.error('[Apply Corrections] Error updating outline:', updateError)
-        return NextResponse.json({ error: updateError.message }, { status: 500 })
-      }
-
-      console.log(`[Apply Corrections] Applied ${totalReplacements} replacements to outline ${outline.id}`)
-    }
+    // 转换统计结果为数组
+    const finalCorrections = Array.from(correctionCounts.values())
 
     return NextResponse.json({
       success: true,
       appliedCount: totalReplacements,
-      corrections: appliedCorrections,
+      outlinesUpdated,
+      totalOutlines: outlines.length,
+      corrections: finalCorrections,
       message: totalReplacements > 0
-        ? `已将 ${appliedCorrections.length} 个名字修正应用到提纲，共替换 ${totalReplacements} 处`
+        ? `已将 ${finalCorrections.length} 个名字修正应用到 ${outlinesUpdated} 个提纲版本，共替换 ${totalReplacements} 处`
         : '提纲中没有需要替换的内容',
     })
   } catch (error: any) {

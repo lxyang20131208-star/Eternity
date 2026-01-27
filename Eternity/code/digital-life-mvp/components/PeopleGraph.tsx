@@ -8,6 +8,7 @@ interface Person {
   avatar_url?: string
   relationship_to_user?: string
   importance_score?: number
+  node_color?: string // 用户自定义的节点颜色
 }
 
 interface Relationship {
@@ -283,7 +284,7 @@ export default function PeopleGraph({
         const midX = (nodeA.x + nodeB.x) / 2
         const midY = (nodeA.y + nodeB.y) / 2
         ctx.fillStyle = '#64748b'
-        ctx.font = '12px sans-serif'
+        ctx.font = '12px "Source Han Serif SC", "Songti SC", "SimSun", serif'
         ctx.textAlign = 'center'
         ctx.fillText(rel.custom_label || rel.relationship_type, midX, midY)
       }
@@ -316,7 +317,7 @@ export default function PeopleGraph({
           const midX = (centerNode.x + node.x) / 2
           const midY = (centerNode.y + node.y) / 2
           ctx.fillStyle = '#94a3b8'
-          ctx.font = '11px sans-serif'
+          ctx.font = '11px "Source Han Serif SC", "Songti SC", "SimSun", serif'
           ctx.textAlign = 'center'
           ctx.fillText(node.person.relationship_to_user || '未知', midX, midY)
         }
@@ -341,7 +342,8 @@ export default function PeopleGraph({
       // 绘制节点圆形
       ctx.beginPath()
       ctx.arc(node.x, node.y, radius, 0, Math.PI * 2)
-      ctx.fillStyle = node.isCenter ? '#8b5cf6' : '#6366f1'
+      // 使用用户自定义颜色，或默认颜色
+      ctx.fillStyle = node.isCenter ? '#8b5cf6' : (node.person.node_color || '#6366f1')
       ctx.fill()
       ctx.strokeStyle = '#ffffff'
       ctx.lineWidth = 3
@@ -354,7 +356,7 @@ export default function PeopleGraph({
       } else {
         ctx.fillStyle = '#ffffff'
         const initialFontSize = node.isCenter ? centerFontSize : Math.max(fontSize, 12)
-        ctx.font = `bold ${initialFontSize}px sans-serif`
+        ctx.font = `bold ${initialFontSize}px "Source Han Serif SC", "Songti SC", "SimSun", serif`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         ctx.fillText(node.person.name.charAt(0), node.x, node.y)
@@ -363,7 +365,7 @@ export default function PeopleGraph({
       // 绘制姓名（使用动态字体大小）
       ctx.fillStyle = '#1f2937'
       const nameFontSize = node.isCenter ? Math.max(fontSize, 14) : Math.max(fontSize - 2, 10)
-      ctx.font = `${nameFontSize}px sans-serif`
+      ctx.font = `${nameFontSize}px "Source Han Serif SC", "Songti SC", "SimSun", serif`
       ctx.textAlign = 'center'
       // 根据节点大小调整名字位置
       const nameOffset = radius + Math.max(15, NODE_RADIUS * 0.4)
@@ -372,7 +374,7 @@ export default function PeopleGraph({
       // 绘制提到次数（如果有，且节点足够大）
       if (!node.isCenter && node.person.importance_score && node.person.importance_score > 0 && NODE_RADIUS >= 25) {
         ctx.fillStyle = '#6b7280'
-        ctx.font = `${Math.max(fontSize - 4, 9)}px sans-serif`
+        ctx.font = `${Math.max(fontSize - 4, 9)}px "Source Han Serif SC", "Songti SC", "SimSun", serif`
         ctx.fillText(`${node.person.importance_score}次`, node.x, node.y + nameOffset + 12)
       }
     })

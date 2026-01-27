@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
-import { getPlaces, getPlace, updatePlace, createPlace } from '@/lib/knowledgeGraphApi';
+import { getPlaces, getPlace, updatePlace, createPlace, deletePlace } from '@/lib/knowledgeGraphApi';
 import type { Place, PlaceWithRelations } from '@/lib/types/knowledge-graph';
 import { supabase } from '@/lib/supabaseClient';
 import PlaceSearch from '@/components/PlaceSearch';
 import PlaceUploadModal from '@/components/PlaceUploadModal';
 import UnifiedNav from '@/app/components/UnifiedNav';
+import { reverseGeocode } from '@/lib/utils/geocoding';
 
 // Dynamic import for Leaflet map (SSR disabled)
 const PlacesMap = dynamic(() => import('@/components/PlacesMap'), {
@@ -32,6 +33,8 @@ export default function PlacesPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [extracting, setExtracting] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [fixingAddresses, setFixingAddresses] = useState(false);
+  const [fixProgress, setFixProgress] = useState({ current: 0, total: 0 });
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -93,7 +96,9 @@ export default function PlacesPage() {
   }, [projectId]);
 
   async function loadData() {
-    if (!projectId) return;
+    if (!projectId) {
+      return;
+    }
 
     try {
       setLoading(true);
@@ -115,8 +120,12 @@ export default function PlacesPage() {
       });
 
       setGroupedPlaces(grouped);
-    } catch (error) {
-      console.error('加载地点失败:', error);
+    } catch (error: any) {
+      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+        console.debug('Load aborted');
+        return;
+      }
+      console.error('加载地点失败:', error.message || error);
     } finally {
       setLoading(false);
     }
@@ -182,6 +191,21 @@ export default function PlacesPage() {
     }
   }
 
+  async function handlePlaceDelete() {
+    if (!selectedPlace) return;
+    
+    if (confirm(`确定要删除地点 "${selectedPlace.name}" 吗？此操作无法撤销。`)) {
+      try {
+        await deletePlace(selectedPlace.id);
+        setSelectedPlace(null);
+        await loadData(); // Refresh list
+      } catch (error) {
+        console.error('Delete failed:', error);
+        alert('删除失败');
+      }
+    }
+  }
+
   async function extractPlaces() {
     if (!projectId || extracting) return;
 
@@ -218,6 +242,58 @@ export default function PlacesPage() {
   const placesWithCoords = useMemo(() => {
     return filteredPlaces.filter(p => p.lat && p.lng);
   }, [filteredPlaces]);
+
+  // 新增：找出有坐标但没有地址信息的地点
+  const placesMissingAddress = useMemo(() => {
+    return placesWithCoords.filter(p => !p.metadata?.address);
+  }, [placesWithCoords]);
+
+  async function handleFixMissingAddresses() {
+    if (placesMissingAddress.length === 0) return;
+    
+    if (!confirm(`将为 ${placesMissingAddress.length} 个地点自动获取地址信息？\n注意：这可能需要一些时间（每秒处理 1 个以符合 API 限制）。`)) {
+      return;
+    }
+
+    setFixingAddresses(true);
+    setFixProgress({ current: 0, total: placesMissingAddress.length });
+
+    try {
+      for (let i = 0; i < placesMissingAddress.length; i++) {
+        const place = placesMissingAddress[i];
+        setFixProgress({ current: i + 1, total: placesMissingAddress.length });
+
+        // 1. 调用 Nominatim API
+        if (place.lat && place.lng) {
+          const address = await reverseGeocode(place.lat, place.lng); 
+          
+          if (address) {
+            // 2. 更新数据库
+            await updatePlace(place.id, {
+              metadata: {
+                ...place.metadata,
+                address: address, // 保存获取到的地址
+                geocoded_at: new Date().toISOString()
+              }
+            });
+          }
+        }
+
+        // 3. 延时防限流 (最后一次循环不需要延时)
+        if (i < placesMissingAddress.length - 1) {
+          await new Promise(r => setTimeout(r, 1200));
+        }
+      }
+
+      alert('地址补全完成！');
+      await loadData(); // 重新加载数据以更新 UI
+    } catch (error) {
+      console.error('Batch fix failed:', error);
+      alert('处理过程中发生错误，部分地址可能未更新。');
+    } finally {
+      setFixingAddresses(false);
+    }
+  }
 
   function formatTimeRange(place: PlaceWithRelations): string {
     const events = place.events || [];
@@ -348,6 +424,25 @@ export default function PlacesPage() {
                   📍 提示：{places.length} 个地点尚未添加坐标，无法在地图上显示。使用AI抽取或手动编辑添加坐标。
                 </div>
               )}
+
+              {/* 新增：地址补全提示 */}
+              {placesMissingAddress.length > 0 && (
+                <div className="mt-4 bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded-lg text-sm flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span>📍 发现 {placesMissingAddress.length} 个地点有坐标但缺少地址信息。</span>
+                  </div>
+                  <button
+                    onClick={handleFixMissingAddresses}
+                    disabled={fixingAddresses}
+                    className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:opacity-50 text-xs font-medium whitespace-nowrap"
+                  >
+                    {fixingAddresses 
+                      ? `处理中 ${fixProgress.current}/${fixProgress.total}...` 
+                      : '🌏 自动补全地址'
+                    }
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Side panel */}
@@ -359,6 +454,7 @@ export default function PlacesPage() {
                   onPlaceClick={handlePlaceClick}
                   formatTimeRange={formatTimeRange}
                   onUpdate={handlePlaceUpdate}
+                  onDelete={handlePlaceDelete}
                   onUpload={() => setIsUploadModalOpen(true)}
                 />
               ) : (
@@ -369,16 +465,65 @@ export default function PlacesPage() {
                       <button
                         key={place.id}
                         onClick={() => handlePlaceClick(place.id)}
-                        className="w-full text-left p-3 border border-gray-200 rounded-lg hover:border-green-500 hover:bg-green-50 transition-all"
+                        className="w-full text-left p-4 border border-gray-200 rounded-xl hover:border-green-500 hover:shadow-md transition-all bg-white mb-3 group"
                       >
-                        <div className="font-medium text-gray-900">{place.name}</div>
-                        {place.description && (
-                          <div className="text-sm text-gray-500 truncate">{place.description}</div>
-                        )}
-                        {place.lat && place.lng && (
-                          <div className="text-xs text-gray-400 mt-1">
-                            📍 {place.lat.toFixed(2)}, {place.lng.toFixed(2)}
+                        {/* 第一行：名称 */}
+                        <div className="font-semibold text-gray-900 text-lg mb-1 group-hover:text-green-700 transition-colors">
+                          {place.name}
+                        </div>
+
+                        {/* 第二行：城市 · 国家 */}
+                        <div className="text-xs text-gray-500 mb-2 font-medium flex items-center gap-1">
+                           <span className="uppercase tracking-wider bg-gray-100 px-2 py-0.5 rounded text-[10px] text-gray-600">
+                            {(() => {
+                              // 特殊层级直接显示
+                              if (place.place_level === 'country') return '国家';
+                              if (place.place_level === 'city') return '城市';
+                              
+                              // 尝试从地址中提取 "城市 · 国家"
+                              if (place.metadata?.address) {
+                                const parts = place.metadata.address.split(/[,，]/).map((s: string) => s.trim());
+                                // 简单的过滤：取最后两段非邮编的文本
+                                const validParts = parts.filter((p: string) => p && !/^\d+$/.test(p) && !/^\d+-\d+$/.test(p));
+                                
+                                if (validParts.length >= 2) {
+                                  const country = validParts[validParts.length - 1];
+                                  const city = validParts[validParts.length - 2];
+                                  // 如果包含数字（可能是街道号），则尝试往前找
+                                  if (/\d/.test(city) && validParts.length >= 3) {
+                                     return `${validParts[validParts.length - 3]} · ${country}`;
+                                  }
+                                  return `${city} · ${country}`;
+                                } else if (validParts.length === 1) {
+                                  return validParts[0];
+                                }
+                              }
+                              
+                              // 如果有坐标但没有地址
+                              if (place.lat && place.lng) {
+                                // 暂时显示坐标，等待补全
+                                return `${place.lat.toFixed(1)}°N, ${place.lng.toFixed(1)}°E (未获取地址)`;
+                              }
+                              
+                              return '未知区域';
+                            })()}
+                          </span>
+                          
+                          {/* 如果地址很长，且未在标签中完全展示，可以在这里补充显示，或者隐藏以保持简洁 */}
+                          {place.metadata?.address && (
+                            <span className="truncate flex-1 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {place.metadata.address}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* 第三行：斜体描述 */}
+                        {place.description ? (
+                          <div className="text-sm text-gray-400 italic font-serif border-l-2 border-gray-100 pl-3 py-1 line-clamp-3">
+                            {place.description}
                           </div>
+                        ) : (
+                           <div className="text-xs text-gray-300 italic pl-3">暂无描述</div>
                         )}
                       </button>
                     ))}
@@ -475,6 +620,7 @@ export default function PlacesPage() {
                   onPlaceClick={handlePlaceClick}
                   formatTimeRange={formatTimeRange}
                   onUpdate={handlePlaceUpdate}
+                  onDelete={handlePlaceDelete}
                   onUpload={() => setIsUploadModalOpen(true)}
                 />
               ) : (
@@ -513,6 +659,7 @@ function PlaceDetailPanel({
   onPlaceClick,
   formatTimeRange,
   onUpdate,
+  onDelete,
   onUpload
 }: {
   place: PlaceWithRelations;
@@ -520,6 +667,7 @@ function PlaceDetailPanel({
   onPlaceClick: (id: string) => void;
   formatTimeRange: (place: PlaceWithRelations) => string;
   onUpdate: (updates: Partial<Place>) => void;
+  onDelete: () => void;
   onUpload: () => void;
 }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -552,7 +700,13 @@ function PlaceDetailPanel({
               >
                 ✏️ 编辑
               </button>
-               <button
+              <button
+                onClick={onDelete}
+                className="text-sm text-red-600 hover:text-red-800"
+              >
+                🗑️ 删除
+              </button>
+              <button
                 onClick={onUpload}
                 className="text-sm bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700"
               >

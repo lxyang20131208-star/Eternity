@@ -210,13 +210,25 @@ export async function getPlaces(projectId: string, filters?: PlaceFilters): Prom
   }
 
   const { data: places, error } = await query;
-  if (error) throw error;
-  if (!places) return [];
+  if (error) {
+    console.error('getPlaces query error:', error);
+    throw error;
+  }
+  
+  if (!places || places.length === 0) {
+    return [];
+  }
 
   // 如果需要事件信息
   if (filters?.hasEvents) {
     const placeIds = places.map((p) => p.id);
-    const { data: eventPlaces } = await supabase.from('event_places').select('place_id, events(*)').in('place_id', placeIds);
+    const { data: eventPlaces, error: eventError } = await supabase.from('event_places').select('place_id, events(*)').in('place_id', placeIds);
+    
+    if (eventError) {
+      console.warn('Failed to fetch event_places:', eventError);
+      // Fallback to places without events if events fetch fails
+      return places;
+    }
 
     return places.map((place) => ({
       ...place,

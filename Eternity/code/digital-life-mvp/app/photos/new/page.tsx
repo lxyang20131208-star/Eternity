@@ -26,6 +26,21 @@ export type PhotoItem = {
   placeId?: string
   placeName?: string
   caption?: string
+  // AI Analysis
+  aiAnalysis?: {
+    description?: string
+    people_count?: number
+    people_description?: string
+    location_type?: string
+    location_guess?: string
+    time_period?: string
+    occasion?: string
+    emotions?: string
+    keywords?: string[]
+    suggested_caption?: string
+  }
+  aiMatchedQuestions?: Question[]
+  isAnalyzing?: boolean
   // Legacy scene fields
   scene: {
     location?: string
@@ -298,6 +313,7 @@ export default function NewPhotoFlow() {
           people: [],
           timePrecision: 'fuzzy',
           scene: { tags: [] },
+          isAnalyzing: true, // 标记为正在分析
         })
       }
 
@@ -305,9 +321,68 @@ export default function NewPhotoFlow() {
       setSelectedPhotoId((prev) => prev ?? uploaded[0]?.id ?? null)
       setStatus("uploaded")
       setStep(2)
+
+      // 自动触发 AI 分析
+      for (const photo of uploaded) {
+        analyzePhoto(photo.id, photo.remoteUrl || photo.previewUrl)
+      }
     } catch (e: any) {
       setError(e?.message ?? "上传失败，请重试")
       setStatus("idle")
+    }
+  }
+
+  // AI 分析照片
+  async function analyzePhoto(photoId: string, imageUrl: string) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        console.warn('[AI Analysis] No session, skipping analysis')
+        setPhotos(prev => prev.map(p => 
+          p.id === photoId ? { ...p, isAnalyzing: false } : p
+        ))
+        return
+      }
+
+      const formData = new FormData()
+      formData.append('imageUrl', imageUrl)
+
+      const response = await fetch('/api/photos/analyze', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: formData
+      })
+
+      if (!response.ok) {
+        throw new Error('Analysis failed')
+      }
+
+      const data = await response.json()
+      console.log('[AI Analysis] Result:', data)
+
+      setPhotos(prev => prev.map(p => {
+        if (p.id !== photoId) return p
+        return {
+          ...p,
+          isAnalyzing: false,
+          aiAnalysis: data.analysis,
+          aiMatchedQuestions: data.matchedQuestions || [],
+          // 自动填充建议的描述
+          caption: p.caption || data.suggestedCaption || data.analysis?.suggested_caption,
+        }
+      }))
+
+      // 如果有匹配的问题，自动选择第一个作为推荐
+      if (data.matchedQuestions?.length > 0) {
+        showToast(`🎯 AI 已分析照片并推荐了 ${data.matchedQuestions.length} 个相关问题`, 'success')
+      }
+    } catch (e) {
+      console.error('[AI Analysis] Error:', e)
+      setPhotos(prev => prev.map(p => 
+        p.id === photoId ? { ...p, isAnalyzing: false } : p
+      ))
     }
   }
 
@@ -672,11 +747,126 @@ export default function NewPhotoFlow() {
               <div style={styles.cardHeader}>Step 2 · 关联问题 <span style={styles.required}>*必填</span></div>
               <p style={styles.cardHint}>选择这张照片回答的是哪个人生问题，便于后续自动插入自传。</p>
 
+              {/* AI 分析状态 */}
+              {currentPhoto.isAnalyzing && (
+                <div style={{
+                  padding: '12px 16px',
+                  background: 'linear-gradient(135deg, #EEF2FF, #E0E7FF)',
+                  borderRadius: 12,
+                  marginBottom: 16,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  border: '1px solid rgba(99, 102, 241, 0.2)',
+                }}>
+                  <div style={{
+                    width: 20,
+                    height: 20,
+                    border: '2px solid #6366F1',
+                    borderTopColor: 'transparent',
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite',
+                  }} />
+                  <span style={{ color: '#4F46E5', fontSize: 13 }}>🤖 AI 正在分析照片内容并匹配问题...</span>
+                </div>
+              )}
+
+              {/* AI 推荐的问题 */}
+              {!currentPhoto.isAnalyzing && currentPhoto.aiMatchedQuestions && currentPhoto.aiMatchedQuestions.length > 0 && (
+                <div style={{
+                  marginBottom: 16,
+                  padding: 16,
+                  background: 'linear-gradient(135deg, #FEF3C7, #FDE68A)',
+                  borderRadius: 12,
+                  border: '1px solid rgba(217, 119, 6, 0.2)',
+                }}>
+                  <div style={{ 
+                    fontSize: 13, 
+                    fontWeight: 600, 
+                    color: '#92400E', 
+                    marginBottom: 10,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}>
+                    🎯 AI 推荐的问题（点击选择）
+                  </div>
+                  {currentPhoto.aiAnalysis?.description && (
+                    <div style={{
+                      fontSize: 12,
+                      color: '#78350F',
+                      marginBottom: 12,
+                      padding: '8px 10px',
+                      background: 'rgba(255,255,255,0.5)',
+                      borderRadius: 8,
+                      lineHeight: 1.5,
+                    }}>
+                      📷 {currentPhoto.aiAnalysis.description}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {currentPhoto.aiMatchedQuestions.slice(0, 5).map((q, idx) => (
+                      <button
+                        key={q.id}
+                        style={{
+                          padding: '10px 14px',
+                          background: currentPhoto.linkedQuestionId === q.id 
+                            ? 'linear-gradient(135deg, #FCD34D, #FBBF24)' 
+                            : 'rgba(255,255,255,0.8)',
+                          border: currentPhoto.linkedQuestionId === q.id 
+                            ? '2px solid #F59E0B' 
+                            : '1px solid rgba(217, 119, 6, 0.15)',
+                          borderRadius: 10,
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          fontSize: 13,
+                          color: '#78350F',
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 8,
+                          transition: 'all 0.2s',
+                        }}
+                        onClick={() => setLinkedQuestion(q.id)}
+                      >
+                        <span style={{ 
+                          minWidth: 22, 
+                          height: 22, 
+                          background: idx === 0 ? '#F59E0B' : '#D97706', 
+                          color: '#fff', 
+                          borderRadius: 6,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 11,
+                          fontWeight: 600,
+                        }}>
+                          {idx + 1}
+                        </span>
+                        <span style={{ flex: 1 }}>{q.question_text}</span>
+                        {currentPhoto.linkedQuestionId === q.id && (
+                          <span style={{ color: '#92400E' }}>✓</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {currentPhoto.linkedQuestionId && (
                 <div style={styles.selectedBadge}>
                   已选择: {questions.find(q => q.id === currentPhoto.linkedQuestionId)?.question_text || currentPhoto.linkedQuestionId}
                 </div>
               )}
+
+              <div style={{ 
+                fontSize: 13, 
+                color: '#6B7280', 
+                marginBottom: 12,
+                padding: '8px 0',
+                borderBottom: '1px solid #E8E4DE',
+              }}>
+                📚 或从全部问题中选择：
+              </div>
 
               <div style={{ maxHeight: 400, overflowY: 'auto' }}>
                 {Object.entries(questionsByCategory).map(([category, categoryQuestions]) => (

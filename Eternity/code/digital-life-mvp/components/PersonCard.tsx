@@ -14,6 +14,7 @@ interface Person {
   importance_score?: number
   confidence_score?: number
   extraction_status?: string
+  node_color?: string // 用户自定义的节点颜色
   photos?: Array<{
     url: string
     caption?: string
@@ -21,6 +22,22 @@ interface Person {
     isPrimary?: boolean
   }>
 }
+
+// 预设颜色选项
+const COLOR_PRESETS = [
+  { value: '#6366f1', label: '靛蓝（默认）' },
+  { value: '#ef4444', label: '红色' },
+  { value: '#f97316', label: '橙色' },
+  { value: '#eab308', label: '黄色' },
+  { value: '#22c55e', label: '绿色' },
+  { value: '#14b8a6', label: '青色' },
+  { value: '#3b82f6', label: '蓝色' },
+  { value: '#a855f7', label: '紫色' },
+  { value: '#ec4899', label: '粉色' },
+  { value: '#6b7280', label: '灰色' },
+  { value: '#78716c', label: '棕色' },
+  { value: '#1f2937', label: '深黑' },
+]
 
 interface PersonCardProps {
   person: Person
@@ -68,6 +85,7 @@ export default function PersonCard({ person, onUpdate, onDelete, onClose, onMerg
     relationship_to_user: person.relationship_to_user || '',
     bio_snippet: person.bio_snippet || '',
     aliases: person.aliases || [],
+    node_color: person.node_color || '#6366f1',
   })
   const [newAlias, setNewAlias] = useState('')
   const [customRelationship, setCustomRelationship] = useState('')
@@ -85,6 +103,7 @@ export default function PersonCard({ person, onUpdate, onDelete, onClose, onMerg
           : editedData.relationship_to_user,
         bio_snippet: editedData.bio_snippet,
         aliases: editedData.aliases,
+        node_color: editedData.node_color,
       }
 
       await onUpdate(person.id, updates)
@@ -240,6 +259,7 @@ export default function PersonCard({ person, onUpdate, onDelete, onClose, onMerg
                       relationship_to_user: person.relationship_to_user || '',
                       bio_snippet: person.bio_snippet || '',
                       aliases: person.aliases || [],
+                      node_color: person.node_color || '#6366f1',
                     })
                   }}
                   className="px-4 py-2 bg-gray-300 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-400 dark:hover:bg-gray-600 transition-colors"
@@ -389,6 +409,55 @@ export default function PersonCard({ person, onUpdate, onDelete, onClose, onMerg
               <p className="text-gray-700 dark:text-gray-300">
                 {person.bio_snippet || '暂无描述'}
               </p>
+            )}
+          </div>
+
+          {/* Node Color Picker */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              节点颜色
+              <span className="ml-2 text-xs text-gray-500">（在家庭关系图中的圆圈颜色）</span>
+            </label>
+            {isEditing ? (
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                {COLOR_PRESETS.map((color) => (
+                  <button
+                    key={color.value}
+                    onClick={() => setEditedData({ ...editedData, node_color: color.value })}
+                    className={`relative h-10 rounded-lg transition-all ${
+                      editedData.node_color === color.value
+                        ? 'ring-2 ring-offset-2 ring-blue-500 dark:ring-offset-gray-900'
+                        : 'hover:scale-105'
+                    }`}
+                    style={{ backgroundColor: color.value }}
+                    title={color.label}
+                  >
+                    {editedData.node_color === color.value && (
+                      <svg
+                        className="absolute inset-0 m-auto w-5 h-5 text-white drop-shadow"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-10 h-10 rounded-lg border-2 border-white shadow-md"
+                  style={{ backgroundColor: person.node_color || '#6366f1' }}
+                />
+                <span className="text-gray-900 dark:text-white">
+                  {COLOR_PRESETS.find((c) => c.value === person.node_color)?.label || '靛蓝（默认）'}
+                </span>
+              </div>
             )}
           </div>
 

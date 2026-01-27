@@ -20,6 +20,7 @@ interface Person {
   importance_score?: number
   confidence_score?: number
   extraction_status?: string
+  node_color?: string // 用户自定义的节点颜色
   photos?: Array<{
     url: string
     caption?: string

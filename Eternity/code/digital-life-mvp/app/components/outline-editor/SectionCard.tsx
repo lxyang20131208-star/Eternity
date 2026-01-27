@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { RichTextEditor } from './RichTextEditor'
+import { ChapterPhotos } from './ChapterPhotos'
 import type { OutlineSectionV2, RichTextContent } from '@/lib/types/outline'
 import { textToRichContent, createEmptyBullet } from '@/lib/types/outline'
 
@@ -202,6 +203,9 @@ export function SectionCard({ section, index, onUpdate, onDelete }: SectionCardP
               </div>
             </div>
           )}
+
+          {/* Photos */}
+          <ChapterPhotos sourceIds={section.source_ids} />
         </div>
       )}
 
